@@ -188,7 +188,7 @@ class SilSim:
             tuple: A tuple containing the configured Rocket object and its controller.
         """
         maurice2 = Rocket(
-            radius=7.87/200,
+            radius=0.079,
             mass=2.259,
             inertia=(0.28, 0.002940, 0.002940),
             power_off_drag=0.560,

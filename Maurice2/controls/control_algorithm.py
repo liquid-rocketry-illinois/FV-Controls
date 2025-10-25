@@ -12,7 +12,7 @@ class Controls:
             prop_mass: float = 0.355, # kg
             L_ne: float = 1.17, # m
             dt: float = 0.01,
-            x0: np.ndarray = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0]), # Initial state
+            x0: np.ndarray = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]), # Initial state
             u0: np.ndarray = np.array([0.0]), # Initial input
             Ks: np.ndarray = None,
             L: np.ndarray = None,
@@ -942,22 +942,13 @@ class Controls:
             A = np.array(self.A.n()).astype(np.float64)
             B = np.array(self.B.n()).astype(np.float64)
             C = np.array(self.C.n()).astype(np.float64)
-
-            ## Add back thrust and gravity terms (differentiated to 0 in computing A) ##
-
-            # ## Gravity in body frame ##
-            # g_world = np.array([0.0, 0.0, -9.81])
-            # qw, qx, qy, qz = xhat[6], xhat[7], xhat[8], xhat[9]
-            # R_world_to_body = np.array(self.R_BW_from_q(qw, qx, qy, qz)).astype(np.float64)  # Rotation matrix from world to body frame
-            # g = R_world_to_body @ g_world  # Transform gravitational force to body frame
-            # g_size = np.zeros_like(A @ xhat)
-            # g_size[3:6] = g
-            # # self.g = g_size
             
             ## Control Law ##
             theta, phi, psi = self.quat_to_euler_xyz(xhat[6:10])  # Convert quaternion to Euler angles
             y = self.deriveSensorModels(t, xhat[0], xhat[1], xhat[2],
                                     theta, phi, psi)  # Simulated sensor measurements
+            
+            ## Add back thrust and gravity terms (differentiated to 0 in computing A) ##
             xdot = A @ xhat + B @ u + self.get_thrust_accel(t) + self.get_gravity_accel(xhat) \
                     # - self.L @ (C @ xhat - y)
             xhat = xhat + xdot * self.dt

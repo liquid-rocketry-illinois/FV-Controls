@@ -14,19 +14,21 @@ class Controls:
             dt: float = 0.01,
             x0: np.ndarray = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]), # Initial state
             u0: np.ndarray = np.array([0.0]), # Initial input
-            Ks: np.ndarray = None,
+            Ks: list = None,
+            pre_transition_width: float = None,
+            post_transition_width: float = None,
             L: np.ndarray = None,
         ):
         """Initialize the Controls class. Rocket body axis is aligned with y-axis.
 
         Args:
-            t_motor_burnout (float, optional): Time until motor burnout in seconds. Defaults to 1.971.
-            t_estimated_apogee (float, optional): Estimated time until apogee in seconds. Defaults to 13.571.
-            t_launch_rail_clearance (float, optional): Time until launch rail clearance in seconds. Defaults to 0.164.
-            prop_mass (float, optional): Propellant mass in kg. Defaults to 0.355.
-            L_ne (float, optional): Distance the nozzle is from the tip of the nose cone in meters. Defaults to 1.17.
-            dt (float, required): Time step for simulation in seconds. Defaults to 0.01.
-            K (np.ndarray, required): Gain matrix. Defaults to None.
+            t_motor_burnout (float): Time until motor burnout in seconds. Defaults to 1.971.
+            t_estimated_apogee (float): Estimated time until apogee in seconds. Defaults to 13.571.
+            t_launch_rail_clearance (float): Time until launch rail clearance in seconds. Defaults to 0.164.
+            prop_mass (float): Propellant mass in kg. Defaults to 0.355.
+            L_ne (float): Distance the nozzle is from the tip of the nose cone in meters. Defaults to 1.17.
+            dt (float): Time step for simulation in seconds. Defaults to 0.01.
+            Ks (tuple): Gain matrix. Defaults to None.
         """
         self.t_motor_burnout = t_motor_burnout # seconds
         self.t_estimated_apogee = t_estimated_apogee # seconds
@@ -36,13 +38,16 @@ class Controls:
         self.csv_path = self.csv_path = (
             Path(__file__).resolve().parents[1] / "data" / "openrocket_data.csv"
         )
-        # self.csv_path = "/Users/dsong/Library/CloudStorage/OneDrive-UniversityofIllinois-Urbana/Club Stuff/LRI/FV-Controls/Control/openrocket_data.csv"
         self.A : Matrix = None
         self.B : Matrix = None
         self.C : Matrix = None
         self.f_preburnout : Matrix = None
         self.f_postburnout : Matrix = None
         self.Ks : np.ndarray = Ks
+        self.pre_transition_width : float = pre_transition_width
+        self.post_transition_width : float = post_transition_width
+        self.pre_v3_mid : float = None
+        self.post_v3_mid : float = None
         self.L : np.ndarray = L
         self.vars : list = None
         self.f_params : Matrix = None
@@ -455,9 +460,9 @@ class Controls:
         Fl : Matrix = L * nL # Lift force vector
 
         ## Total Forces ##
-        # F = T + Fd + Fl + Fg # Total force vector
+        F = T + Fd + Fl + Fg # Total force vector
 
-        F = Fd + Fl # For debugging, add thrust and gravity in loop to avoid differentiating them to 0 in A
+        # F = Fd + Fl # For debugging, add thrust and gravity in loop to avoid differentiating them to 0 in A
 
         ## Cnalpha ##
         Cnalpha = 0.207  # Linear assumption of Cn vs AoA slope from OpenRocket data (fitted to quadratic, minimal x^2 coefficient)
@@ -478,10 +483,6 @@ class Controls:
         # Multiplying by stability because CG is where rotation is about and CP is where force is applied
             # SM = (CP - CG) / d
         C_raw = H * v_mag**2 * A * Cnalpha * AoA_eff * (SM * d) * rho / 2 # See if it's Cnalpha or Cn, Cn = Cnalpha * AoA_eff
-        # Ccm_mag = Piecewise(
-        #     (0, C_raw <= 0),
-        #     (Min(C_raw, Float(5e-2)), True)                      # cap magnitude (tune)
-        # )
         Ccm = Matrix([C_raw * sin(beta), -C_raw * cos(beta), 0])  # Corrective moment vector
 
         ## Propulsive Damping Moment Coefficient (Cdp) ##
@@ -499,7 +500,7 @@ class Controls:
         M_delta = self.getAileronMoment(delta1, v3)
         M1 = M_fin[0] + M_delta[0] + Ccm[0] - Cdm * w1
         M2 = M_fin[1] + M_delta[1] + Ccm[1] - Cdm * w2
-        M3 = M_fin[2] + M_delta[2] + Ccm[2] - Float(0.1) * Cdm * w3
+        M3 = M_fin[2] + M_delta[2] + Ccm[2]
 
         ## Quaternion kinematics ##
         S = Matrix([[0, -w3, w2],
@@ -640,6 +641,26 @@ class Controls:
         self.Bs.append(B)
 
 
+    def set_K_params(self, K_pre_max: float, K_pre_min: float, K_post_max: float, K_post_min: float, pre_width: float, post_width: float, pre_v3_mid: float, post_v3_mid: float):
+        """Set the gain scheduling parameters for the control law.
+
+        Args:
+            K_pre_max (float): Maximum gain value pre-burnout.
+            K_pre_min (float): Minimum gain value pre-burnout.
+            K_post_max (float): Maximum gain value post-burnout.
+            K_post_min (float): Minimum gain value post-burnout.
+            pre_width (float): Transition width for pre-burnout gain scheduling.
+            post_width (float): Transition width for post-burnout gain scheduling.
+            pre_v3_mid (float): Midpoint vertical velocity for pre-burnout gain scheduling.
+            post_v3_mid (float): Midpoint vertical velocity for post-burnout gain scheduling.
+        """
+        self.Ks = [K_pre_max, K_pre_min, K_post_max, K_post_min]
+        self.pre_transition_width = pre_width
+        self.post_transition_width = post_width
+        self.pre_v3_mid = pre_v3_mid
+        self.post_v3_mid = post_v3_mid
+
+
     def control_law(self, xhat: np.array, t: float):
         """Compute the control input based on the current state estimate and gain matrix.
 
@@ -656,15 +677,14 @@ class Controls:
         if (t < self.t_motor_burnout):
             Kmax = self.Ks[0]
             Kmin = self.Ks[1]
-            v3_mid = 100 # m/s, tune as necessary
-            K_val = Kmin + (Kmax - Kmin) / (1 + exp((v3 - v3_mid)/7))
+            K_val = Kmin + (Kmax - Kmin) / (1 + exp((v3 - self.pre_v3_mid)/self.pre_transition_width))
 
         # Postburnout
         else:
             Kmax = self.Ks[2]
             Kmin = self.Ks[3]
             v3_mid = 80 # m/s, tune as necessary hiii dan :3
-            K_val = Kmin + (Kmax - Kmin) / (1 + exp((v3 - v3_mid)/6))
+            K_val = Kmin + (Kmax - Kmin) / (1 + exp((v3 - self.post_v3_mid)/self.post_transition_width))
         K = np.zeros((1, 10))
         K[0][2] = K_val
 
@@ -888,15 +908,13 @@ class Controls:
             # (optionally compute C, y, and use L for a correction later)
             xhat = self._rk4_step(t, xhat, u)
 
-            # quaternion normalize
+            # Normalize quaternion
             qn = np.linalg.norm(xhat[6:10])
             xhat[6:10] = np.array([1.,0.,0.,0.]) if qn < 1e-12 else xhat[6:10]/qn
 
-            # basic control law (keep small for now)
-            x_des = self.x0.copy()
-            x_des[2] = 0.0
-            x_des[5] = float(xhat[5])
-            u = np.clip(-self.K @ (xhat - x_des) + self.u0, np.deg2rad(-8), np.deg2rad(8))
+            # Control law
+            K = self.control_law(xhat, t)
+            u = np.clip(-K @ (xhat - self.x0) + self.u0, np.deg2rad(-8), np.deg2rad(8))
 
             # log + advance time
             self.states.append(xhat.copy())
@@ -920,7 +938,10 @@ class Controls:
             f_subs = np.array(self.f_subs, dtype=float).reshape(-1)
             xhat = xhat + f_subs * self.dt
             xhat[6:10] /= np.linalg.norm(xhat[6:10])
-            u = np.clip(-self.K @ (xhat - self.x0) + self.u0, np.deg2rad(-8), np.deg2rad(8))
+            K = self.control_law(xhat, t)
+            u = np.clip(-K @ (xhat - self.x0) + self.u0, np.deg2rad(-8), np.deg2rad(8))
+            # u = np.array([0.0])  # For testing, set aileron to 0
+
             self.states.append(xhat)
             self.inputs.append(u)
             t = t + self.dt
@@ -938,7 +959,7 @@ class Controls:
             u (np.array): The current input as a numpy array.
         """
         while t < self.t_estimated_apogee:
-            print(f"t: {t:.3f}, xhat: {xhat}, u: {u}")
+            print(f"t: {t:.3f}, xhat: {xhat}, u: {np.rad2deg(u)}")
             self.computeAB(t, xhat, u)
             self.computeC(xhat, u)
             A = np.array(self.A.n()).astype(np.float64)
@@ -960,6 +981,7 @@ class Controls:
             K = self.control_law(xhat, t)
             u = np.clip(-K @ (xhat - self.x0) + self.u0, np.deg2rad(-8), np.deg2rad(8))
             # u = np.array([0.0])  # For testing, set aileron to 0
+            
             self.states.append(xhat)
             self.inputs.append(u)
             t = t + self.dt

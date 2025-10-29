@@ -990,6 +990,70 @@ class Controls:
             self.inputs.append(u)
             t = t + self.dt
             # print(f"K: {K[0][2]}")
+
+
+    def export_AB(self, ts: list, xhats: list, inputs: list, As: list, Bs: list, filename: str = "controllervision.csv"):
+        """Export the logged data to a CSV file in the Maurice2/controls/ directory.
+        
+        This function exports the arguments to a CSV file, with headers Time, State, Input, A, B
+        Args:
+            ts: list of times
+            xhats: list of states (each is a numpy array of shape (10,))
+            inputs: list of inputs (each is a numpy array of shape (1,))
+            As: list of A matrices (each is a sympy Matrix)
+            Bs: list of B matrices (each is a sympy Matrix)
+            filename: name of the output CSV file (default: "controllervision.csv")
+        Returns:
+            None
+        """
+        import csv
+        
+        # Ensure all lists have the same length
+        n = len(ts)
+        assert len(xhats) == n, "xhats must have same length as ts"
+        assert len(inputs) == n, "inputs must have same length as ts"
+        assert len(As) == n, "As must have same length as ts"
+        assert len(Bs) == n, "Bs must have same length as ts"
+        
+        # Get the directory where this script is located (Maurice2/controls/)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        filepath = os.path.join(script_dir, filename)
+        
+        # Create the CSV file
+        with open(filepath, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            
+            # Write header
+            writer.writerow(['Time', 'State', 'Input', 'A', 'B'])
+            
+            # Write data rows indexed by time
+            for i in range(n):
+                t = ts[i]
+                xhat = xhats[i]
+                u = inputs[i]
+                A = As[i]
+                B = Bs[i]
+                
+                # Convert to appropriate string representations
+                # State: convert numpy array to string
+                state_str = np.array2string(xhat, separator=',', suppress_small=True)
+                
+                # Input: convert numpy array to string
+                input_str = np.array2string(u, separator=',', suppress_small=True)
+                
+                # A matrix: convert to numpy then to string
+                A_np = np.array(A.n()).astype(np.float64)
+                A_str = np.array2string(A_np.flatten(), separator=',', suppress_small=True, max_line_width=np.inf)
+                
+                # B matrix: convert to numpy then to string
+                B_np = np.array(B.n()).astype(np.float64)
+                B_str = np.array2string(B_np.flatten(), separator=',', suppress_small=True, max_line_width=np.inf)
+                
+                # Write the row
+                writer.writerow([t, state_str, input_str, A_str, B_str])
+        
+        print(f"Data exported to {filepath}")
+
         
 # For testing
 def main():
@@ -1014,7 +1078,17 @@ def main():
     controller.deriveEOM(post_burnout=True)
     controller.buildL(lw=5.0, lqw=1.0, lqx=2.0, lqy=2.0, lqz=2.0)
     controller.test_AB(t0, xhat0, u0)
-    print(controller.As)
+    
+    # Generate time list based on the number of logged states
+    n_steps = len(controller.states)
+    ts = [t0 + i * dt for i in range(n_steps)]
+    
+    # Export the logged data to CSV
+    controller.export_AB(ts, controller.states, controller.inputs, controller.As, controller.Bs)
+    
+    print(f"Total steps: {n_steps}")
+    print(f"Number of As: {len(controller.As)}")
+    print(f"Number of Bs: {len(controller.Bs)}")
 
 if __name__ == "__main__":
     main()

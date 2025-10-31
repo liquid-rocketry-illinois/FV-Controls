@@ -493,7 +493,7 @@ class Controls:
         Cdm = Cdp + Cda
 
         ## Moment due to aileron deflection ##
-        M_fin = 0 * 200 * (Float(1)/2 * rho * v_mag**2) * Matrix([0, 0, 1e-8])  # Fin misalignment, total moment from all four fins, tune later
+        M_fin = 5.5 * (Float(1)/2 * rho * v_mag**2) * Matrix([0, 0, 1e-8])  # Fin misalignment, total moment from all four fins, tune later
         M_delta = self.getAileronMoment(delta1, v3)
         M1 = M_fin[0] + M_delta[0] + Ccm[0] - Cdm * w1
         M2 = M_fin[1] + M_delta[1] + Ccm[1] - Cdm * w2

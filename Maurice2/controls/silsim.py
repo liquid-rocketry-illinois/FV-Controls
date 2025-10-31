@@ -161,14 +161,28 @@ class SilSim:
         ## Get K and L matrices ##
         K, L = self.controller.control_law(xhat=xhat, t=time), self.controller.L
 
-        accel_T = self.controller.get_thrust_accel(t=time)
-        accel_g = self.controller.get_gravity_accel(xhat=xhat)
-        xhatdot = A @ xhat + B @ u_prev + accel_T + accel_g \
-                - L @ (C @ xhat - y)
+        # accel_T = self.controller.get_thrust_accel(t=time)
+        # accel_g = self.controller.get_gravity_accel(xhat=xhat)
+        # xhatdot = A @ xhat + B @ u_prev + accel_T + accel_g \
+        #         - L @ (C @ xhat - y)
+        # xhat = xhat + xhatdot * self.controller.dt
+        # xhat[6:10] /= np.linalg.norm(xhat[6:10])
+        # u = np.clip(-K @ (xhat - self.controller.x0) + self.controller.u0, np.deg2rad(-8), np.deg2rad(8))
+        # u = np.array([0.0]) # Disable control for testing
+
+        f_subs = np.array(self.controller.f_subs, dtype=float).reshape(-1)
+        xhatdot = f_subs - L @ (C @ xhat - y)
         xhat = xhat + xhatdot * self.controller.dt
         xhat[6:10] /= np.linalg.norm(xhat[6:10])
+        K = self.controller.control_law(xhat, time)
         u = np.clip(-K @ (xhat - self.controller.x0) + self.controller.u0, np.deg2rad(-8), np.deg2rad(8))
-        # u = np.array([0.0]) # Disable control for testing
+
+        # xhat = self.controller._rk4_step(time, xhat, u_prev) - L @ (C @ xhat - y)
+        # qn = np.linalg.norm(xhat[6:10])
+        # xhat[6:10] = np.array([1.,0.,0.,0.]) if qn < 1e-12 else xhat[6:10]/qn
+        # K = self.controller.control_law(xhat, time)
+        # u = np.clip(-K @ (xhat - self.controller.x0) + self.controller.u0, np.deg2rad(-8), np.deg2rad(8))
+
         fins.aileronAngles = u
         self.times.append(time)
         self.inputs.append(np.rad2deg(u[0]))
@@ -413,7 +427,8 @@ def main():
                             pre_width=pre_width, post_width=post_width,
                             pre_v3_mid=pre_v3_mid, post_v3_mid=post_v3_mid)
     # controller.buildL(lw=100.0, lqw=4.0, lqx=8.0, lqy=8.0, lqz=8.0)
-    controller.buildL(lw=75.0, lqw=30.0, lqx=60.0, lqy=60.0, lqz=60.0)
+    # controller.buildL(lw=40 , lqw=0.01, lqx=0.5, lqy=0.5, lqz=0.5)
+    controller.buildL(lw=0.0, lqw=0.0, lqx=0.0, lqy=0.0, lqz=0.0)
 
     ## Run SIL simulation ##
     sim = SilSim(sampling_rate=sampling_rate, controller=controller)

@@ -23,7 +23,7 @@ class SilSim:
         self.sampling_rate = sampling_rate
         self.controller = controller
         self.times = []
-        self.xhats = []
+        self.xhats = [self.controller.x0]
         self.states = []
         self.inputs = []
         self.csv_output_path = "Maurice2/data/testing.csv"
@@ -142,7 +142,8 @@ class SilSim:
             return np.array([0.0])  # No control after apogee
         self.controller.dt = 1.0 / sampling_rate
         # Convert RocketPy state to xhat
-        xhat = self.rocketpy_state_to_xhat(state)
+        # xhat = self.rocketpy_state_to_xhat(state)
+        xhat = self.xhats[-1]
 
         # Make measurement y from RocketPy state
         y = self.make_measurement_from_rocketpy(state, time)
@@ -159,17 +160,17 @@ class SilSim:
         B = np.array(B).astype(np.float64)
         C = np.array(C).astype(np.float64)
 
-        ## Get K and L matrices ##
+        # ## Get K and L matrices ##
         K, L = self.controller.control_law(xhat=xhat, t=time), self.controller.L
 
         accel_T = self.controller.get_thrust_accel(t=time)
         accel_g = self.controller.get_gravity_accel(xhat=xhat)
+        # test = xhat + (A @ xhat + B @ u_prev + accel_T + accel_g) * self.controller.dt
         xhatdot = A @ xhat + B @ u_prev + accel_T + accel_g \
                 - L @ (C @ xhat - y)
         xhat = xhat + xhatdot * self.controller.dt
         xhat[6:10] /= np.linalg.norm(xhat[6:10])
         u = np.clip(-K @ (xhat - self.controller.x0) + self.controller.u0, np.deg2rad(-8), np.deg2rad(8))
-        # u = np.array([0.0]) # Disable control for testing
 
         # f_subs = np.array(self.controller.f_subs, dtype=float).reshape(-1)
         # xhatdot = f_subs - L @ (C @ xhat - y)
@@ -184,10 +185,13 @@ class SilSim:
         # K = self.controller.control_law(xhat, time)
         # u = np.clip(-K @ (xhat - self.controller.x0) + self.controller.u0, np.deg2rad(-8), np.deg2rad(8))
 
+        
+        # u = np.array([0.0]) # Temporary: disable control for testing
         fins.aileronAngles = u
         self.times.append(time)
         self.inputs.append(np.rad2deg(u[0]))
         self.xhats.append(xhat.tolist())
+        # self.xhats.append(test.tolist())
         self.states.append(state)
 
         print("Time: " + str(time) + " s, v3: " + str(xhat[5].round(3)) + " m/s, w3: " + str(xhat[2].round(3)) + " rad/s, u: " + str(np.rad2deg(u).round(3)) + " degrees.")
@@ -307,9 +311,9 @@ class SilSim:
             rocket=rocket, environment=env, rail_length=5.2, inclination=85, heading=0
         )
         flight.info()
-        flight.plots.angular_kinematics_data()
-        flight.plots.attitude_data()
-        flight.plots.trajectory_3d()
+        # flight.plots.angular_kinematics_data()
+        # flight.plots.attitude_data()
+        # flight.plots.trajectory_3d()
 
         export_loc = str(self.DATA_DIR / "rocketpy_output.csv")
         flight.export_data(
@@ -345,7 +349,7 @@ class SilSim:
         """
 
         # Export to this location
-        path = str(self.DATA_DIR / "silsim_output.csv")
+        path = str(self.DATA_DIR / "silsim_output2.csv")
 
         # Normalize to lists
         times   = list(self.times or [])
@@ -413,22 +417,22 @@ class SilSim:
 # Run SIL simulation, export flight data to CSV
 def main():
     ## Define gain matrix ##
-    K_pre_max = 1.75/7.5e0
-    K_pre_min = 2.5e-1/7.5e0
+    K_pre_max = 5.0e-1
+    K_pre_min = 5.0e-2
 
-    K_post_max = 1.0/7.5e0
-    K_post_min = 2.5e-1/7.5e0
+    K_post_max = 1.0e-1
+    K_post_min = 5.0e-2
 
-    pre_width = 5
+    pre_width = 10
     post_width = 8
 
-    pre_v3_mid = 90.0
+    pre_v3_mid = 75.0
     post_v3_mid = 90.0
 
     ## Define initial conditions ##
     xhat0 = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]) # Initial state estimate
     u0 = np.array([0])
-    sampling_rate = 20.0  # Hz
+    sampling_rate = 25.0  # Hz
     dt = 1.0 / sampling_rate
 
     controller = Controls(dt=dt, x0=xhat0, u0=u0, t_launch_rail_clearance=0.308)
@@ -437,8 +441,12 @@ def main():
                             K_post_max=K_post_max, K_post_min=K_post_min,
                             pre_width=pre_width, post_width=post_width,
                             pre_v3_mid=pre_v3_mid, post_v3_mid=post_v3_mid)
-    controller.buildL(lw=10.0, lqw=0.25, lqx=0.5, lqy=0.5, lqz=0.5)
+    # controller.buildL(lw=10.0, lqw=1.0, lqx=2.0, lqy=2.0, lqz=2.0)
+    lw = 1e-3 # any higher makes the simulation unstable for some dumb reason
+    lq = 1e-4
+    controller.buildL(lw=lw, lqw=lq, lqx=lq, lqy=lq, lqz=lq)
     # controller.buildL(lw=40 , lqw=0.01, lqx=0.5, lqy=0.5, lqz=0.5)
+    # controller.buildL(lw=5.0 , lqw=0.5, lqx=1, lqy=1, lqz=1)
     # controller.buildL(lw=0.0, lqw=0.0, lqx=0.0, lqy=0.0, lqz=0.0)
 
     ## Run SIL simulation ##

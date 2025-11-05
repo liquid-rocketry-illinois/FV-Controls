@@ -194,7 +194,7 @@ class SilSim:
         # self.xhats.append(test.tolist())
         self.states.append(state)
 
-        print("Time: " + str(time) + " s, v3: " + str(xhat[5].round(3)) + " m/s, w3: " + str(xhat[2].round(3)) + " rad/s, u: " + str(np.rad2deg(u).round(3)) + " degrees.")
+        print("Time: " + str(np.float64(time).round(3)) + " s, v3: " + str(np.float64(state[5]).round(3)) + " m/s, w3: " + str(np.float64(state[12]).round(3)) + " rad/s, u: " + str(np.rad2deg(u).round(3)) + " degrees.")
 
         return u
 
@@ -417,11 +417,11 @@ class SilSim:
 # Run SIL simulation, export flight data to CSV
 def main():
     ## Define gain matrix ##
-    K_pre_max = 5.0e-1
-    K_pre_min = 5.0e-2
+    K_pre_max = 1.0e-0
+    K_pre_min = 1.0e-1
 
-    K_post_max = 1.0e-1
-    K_post_min = 5.0e-2
+    K_post_max = 5.0e-1
+    K_post_min = 1.0e-1
 
     pre_width = 10
     post_width = 8
@@ -432,7 +432,7 @@ def main():
     ## Define initial conditions ##
     xhat0 = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]) # Initial state estimate
     u0 = np.array([0])
-    sampling_rate = 25.0  # Hz
+    sampling_rate = 40.0  # Hz
     dt = 1.0 / sampling_rate
 
     controller = Controls(dt=dt, x0=xhat0, u0=u0, t_launch_rail_clearance=0.308)
@@ -442,8 +442,8 @@ def main():
                             pre_width=pre_width, post_width=post_width,
                             pre_v3_mid=pre_v3_mid, post_v3_mid=post_v3_mid)
     # controller.buildL(lw=10.0, lqw=1.0, lqx=2.0, lqy=2.0, lqz=2.0)
-    lw = 1e-3 # any higher makes the simulation unstable for some dumb reason
-    lq = 1e-4
+    lw = 5e-3 # any higher makes the simulation unstable for some dumb reason
+    lq = 5e-3
     controller.buildL(lw=lw, lqw=lq, lqx=lq, lqy=lq, lqz=lq)
     # controller.buildL(lw=40 , lqw=0.01, lqx=0.5, lqy=0.5, lqz=0.5)
     # controller.buildL(lw=5.0 , lqw=0.5, lqx=1, lqy=1, lqz=1)

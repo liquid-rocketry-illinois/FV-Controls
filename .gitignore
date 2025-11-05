@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 Maurice2/.DS_Store
 Maurice2/controls/__pycache__/control_algorithm.cpython-313.pyc
+Maurice2/controls/__pycache__/fin.cpython-313.pyc

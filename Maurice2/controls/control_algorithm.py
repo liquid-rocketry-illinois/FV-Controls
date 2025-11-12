@@ -2,6 +2,7 @@ from sympy import *
 import numpy as np
 import pandas as pd
 from pathlib import Path
+import os
 
 class Controls:
     def __init__(

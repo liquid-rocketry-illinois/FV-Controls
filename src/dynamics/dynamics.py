@@ -63,6 +63,10 @@ class Dynamics:
         # Rocket name (used for saving simulation results from Simluation() object to designated path)
         self.rocket_name = rocket_name
         
+        # State space linearization matrices
+        self.A_sym : Matrix = None # Symbolic state matrix
+        self.A : np.ndarray = None # State matrix
+        
         ## Helpers ##
         self.F : Matrix = None # Forces matrix
         self.M : Matrix = None # Moments matrix
@@ -450,14 +454,14 @@ class Dynamics:
     
         H = Heaviside(t_sym - Float(self.t_launch_rail_clearance), 0)  # 0 if t < t_launch_rail_clearance, 1 if t >= t_launch_rail_clearance
 
-        epsAoA = Float(1e-3)  # Small term to avoid division by zero in AoA calculation
+        epsAoA = Float(1e-9)  # Small term to avoid division by zero in AoA calculation
         AoA = atan2(sqrt(v1**2 + v2**2), v3 + epsAoA) # Angle of attack
         AoA_eff = Piecewise(
             (0,   Abs(AoA) <= epsAoA),                # inside deadband
             (Min(Abs(AoA), 15 * pi / 180) * (AoA/Abs(AoA)), True)  # ±15°
         )
 
-        eps = Float(1e-5)  # Small term to avoid division by zero
+        eps = Float(1e-9)  # Small term to avoid division by zero
         v = Matrix([v1, v2, v3]) # Velocity vector
         v_mag = sqrt(v1**2 + v2**2 + v3**2 + eps**2) # Magnitude of velocity with small term to avoid division by zero
         vhat = v / v_mag  # Unit vector in direction of velocity
@@ -478,7 +482,7 @@ class Dynamics:
         Fd : Matrix = -D * vhat # Drag force vector
 
         ## Lift Force ##
-        eps_beta = Float(1e-5)
+        eps_beta = Float(1e-9)
         nan_guard = sqrt(v1**2 + v2**2 + eps_beta**2)
         beta = 2 * atan2(v2, nan_guard + v1) # Equivalent to atan2(v2, v1) but avoids NaN at (0,0)
         L = H * 1/2 * rho * v_mag**2 * (2 * pi * AoA_eff) * A # Lift force approximation
@@ -518,15 +522,14 @@ class Dynamics:
     
         H = Heaviside(t_sym - Float(self.t_launch_rail_clearance), 0)  # 0 if t < t_launch_rail_clearance, 1 if t >= t_launch_rail_clearance
 
-        epsAoA = Float(1e-5)  # Small term to avoid division by zero in AoA calculation
+        epsAoA = Float(1e-9)  # Small term to avoid division by zero in AoA calculation
         AoA = atan2(sqrt(v1**2 + v2**2), v3 + epsAoA) # Angle of attack
         AoA_eff = Piecewise(
             (0,   Abs(AoA) <= epsAoA),                # inside deadband
             (Min(Abs(AoA), 15 * pi / 180) * (AoA/Abs(AoA)), True)  # ±15°
         )
 
-        eps = Float(1e-5)  # Small term to avoid division by zero
-        v = Matrix([v1, v2, v3]) # Velocity vector
+        eps = Float(1e-9)  # Small term to avoid division by zero
         v_mag = sqrt(v1**2 + v2**2 + v3**2 + eps**2) # Magnitude of velocity with small term to avoid division by zero
 
         ## Rocket reference area ##
@@ -534,14 +537,6 @@ class Dynamics:
         
         ## Stability Margin ##
         AoA_deg = AoA_eff * 180 / pi # Convert AoA to degrees for polynomial fit
-        # SM = 0
-        # if not burnout:
-        #     SM = 2.8 + -0.48*AoA_deg + 0.163*AoA_deg**2 + -0.0386*AoA_deg**3 + \
-        #         5.46E-03*AoA_deg**4 + -4.61E-04*AoA_deg**5 + 2.28E-05*AoA_deg**6 + \
-        #         -6.1E-07*AoA_deg**7 + 6.79E-09*AoA_deg**8
-        # else:
-        #     SM = -0.086*AoA_deg + 2.73
-            
         SM = self.SM_func(burnout, AoA_deg)
 
         ## Corrective moment coefficient ##
@@ -550,7 +545,7 @@ class Dynamics:
         # Equations from ApogeeRockets
         C_raw = H * v_mag**2 * A * Cnalpha_rocket * AoA_eff * (SM * d) * rho / 2
         
-        eps_beta = Float(1e-5)
+        eps_beta = Float(1e-9)
         nan_guard = sqrt(v1**2 + v2**2 + eps_beta**2)
         beta = 2 * atan2(v2, nan_guard + v1) # Equivalent to atan2(v2, v1) but avoids NaN at (0,0)
         
@@ -599,7 +594,7 @@ class Dynamics:
         M2 = M_f[1] - M_d[1] * w2
         M3 = M_f[2] - M_d[2] * w3
         
-        M = Matrix([M1, M2, M3])
+        M = H * Matrix([M1, M2, M3])
         
         self.M = M
 
@@ -760,7 +755,7 @@ class Dynamics:
             f_params = self.f_postburnout.subs(params)
 
         ## Replace sqrt(v1^2 + v2^2) with a non-zero term to avoid NaNs in A matrix ##
-        eps = Float(1e-5)  # Small term to avoid division by zero
+        eps = Float(1e-9)  # Small term to avoid division by zero
         vxy = sqrt(v1**2 + v2**2 + eps**2)
         repl = {
             sqrt(v1**2 + v2**2): vxy,
@@ -786,78 +781,77 @@ class Dynamics:
 
         self.f_subs_params = f_params
         self.f_subs_full = f_subs_full
+        
     
+    def getA(self, t: float, xhat: np.array) -> np.ndarray:
+        """Get the state matrix A evaluated at time t and state xhat.
 
-    def _f(self, t, x):
-        f = np.asarray(self.f_subs_full, float).reshape(-1)
-        return f
-
-    def _rk4_step(self, t, x):
-        dt = self.dt
-        self.set_f(t, x)
-        k1 = np.asarray(self.f_subs_full, float).reshape(-1)
-
-        self.set_f(t + dt/2, x + dt*k1/2)
-        k2 = np.asarray(self.f_subs_full, float).reshape(-1)
-
-        self.set_f(t + dt/2, x + dt*k2/2)
-        k3 = np.asarray(self.f_subs_full, float).reshape(-1)
-
-        self.set_f(t + dt, x + dt*k3)
-        k4 = np.asarray(self.f_subs_full, float).reshape(-1)
-
-        return x + (dt/6.)*(k1 + 2*k2 + 2*k3 + k4)
-
-    
-    def run_rk4(self, xhat: np.array):
-        """Runge-Kutta 4th order integration of the state estimator recursively until the estimated apogee time is reached.
         Args:
-            t (float): The current time in seconds.
-            xhat (np.array): The current state estimate as a numpy array.
-            u (np.array): The current input as a numpy array.
+            t (float): The time in seconds.
+            xhat (np.array): The state estimation vector as a numpy array.
         Returns:
-            np.array: The updated state estimate as a numpy array.
+            np.ndarray: The state matrix A as a numpy array.
         """
-        # loop, not recursion
-        t = self.t0
-        while (t < self.t_launch_rail_clearance or xhat[5] >= 0) and t < self.t_estimated_apogee:
-            xhat = self._rk4_step(t, xhat)
+        
+        self.set_f(t=t, xhat=xhat)
+        w1, w2, w3, v1, v2, v3, qw, qx, qy, qz = self.state_vars
+        m = Matrix(self.state_vars)
+        m_e = {
+            w1: xhat[0],
+            w2: xhat[1],
+            w3: xhat[2],
+            v1: xhat[3],
+            v2: xhat[4],
+            v3: xhat[5],
+            qw: xhat[6],
+            qx: xhat[7],
+            qy: xhat[8],
+            qz: xhat[9],
+        }
+        A : Matrix = self.f_subs_params.jacobian(m).subs(m_e).n()
 
-            # Normalize quaternion
-            qn = np.linalg.norm(xhat[6:10])
-            xhat[6:10] = np.array([1.,0.,0.,0.]) if qn < 1e-12 else xhat[6:10]/qn
+        self.A_sym = A
+        
+        A_num = np.array(A).astype(np.float64)
+        self.A = A_num
 
-            # log + advance time
-            self.states.append(xhat.copy())
-            t += self.dt
-            self.ts.append(t)
-            print(f"t: {t:.3f}")
-        return np.array(self.ts), np.vstack(self.states)
-
-
-    def forward_euler(self, xhat: np.array):
-        """Test the equations of motion by computing f_subs at the given state and input.
+        return A_num
+    
+    
+    def get_thrust_accel(self, t: float):
+        """Get the thrust acceleration at time t.
 
         Args:
-            t (float): The current time in seconds.
-            xhat (np.array): The current state estimate as a numpy array.
-            u (np.array): The current input as a numpy array.
+            t (float): The time in seconds.
+
+        Returns:
+            np.array: The thrust acceleration vector as a numpy array.
         """
-        t = self.t0
-        while t < self.t_estimated_apogee:
-            print(f"t: {t:.3f}, xhat: {xhat}")
+        thrust = self.get_thrust(t)
+        m = self.get_mass(t)
+        a_thrust = np.zeros(10)
+        a_thrust[3] = thrust[0] / m
+        a_thrust[4] = thrust[1] / m
+        a_thrust[5] = thrust[2] / m
+        return a_thrust
 
-            self.set_f(t, xhat)
-            f_subs = np.array(self.f_subs_full, dtype=float).reshape(-1)
-            xhat = xhat + f_subs * self.dt
-            xhat[6:10] /= np.linalg.norm(xhat[6:10])
 
-            self.states.append(xhat)
-            t += self.dt
-            self.ts.append(t)
-            if f_subs[5] < 0:
-                print("Warning: Longitudinal velocity v3 is negative at time t =", t)
-                print(f"t: {t:.3f}, xhat: {xhat}")
+    def get_gravity_accel(self, xhat: np.array):
+        """Get the gravity acceleration in body frame at time t.
+
+        Args:
+            xhat (np.array): The current state estimate as a numpy array.
+
+        Returns:
+            np.array: The gravity acceleration vector as a numpy array.
+        """
+        g = np.array([0.0, 0.0, -self.g])
+        qw, qx, qy, qz = xhat[6], xhat[7], xhat[8], xhat[9]
+        R_world_to_body = np.array(self.R_BW_from_q(qw, qx, qy, qz)).astype(np.float64)
+        g_body = R_world_to_body @ g
+        a_gravity = np.zeros(10)
+        a_gravity[3:6] = g_body
+        return a_gravity
 
       
 # For testing

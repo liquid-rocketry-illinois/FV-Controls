@@ -19,7 +19,7 @@ class Simulation():
         set_controls(controls: Controls): Set the control system for the simulation.
     """
     
-    def __init__(self):
+    def __init__(self, dynamics: Dynamics = None, controls: Controls = None):
         """Initialize the Simulation class.
         
         Attributes:
@@ -27,8 +27,8 @@ class Simulation():
             controls (Controls): The control system of the rocket.
             disable_controls (bool): Flag to disable controls during simulation.
         """
-        self.dynamics : Dynamics = None # Dynamics model
-        self.controls : Controls = None # Control system model
+        self.dynamics : Dynamics = dynamics # Dynamics model
+        self.controls : Controls = controls # Controls model
         self.t0 = 0.0 # Initial time
         self.disable_controls : bool = False # Flag to disable controls during simulation
         self.disable_sensors : bool = False # Flag to disable sensors during simulation
@@ -49,20 +49,6 @@ class Simulation():
         self.root = Path(__file__).resolve().parents[2]  # …/FV-Controls        
         self.dynamics_file_name : str = None
         self.controls_file_name : str = None
-
-
-    def _update_progress_bar(self, current_time: float, total_time: float, prefix: str = "", bar_len: int = 30):
-        """Render an in-place progress bar for long-running loops."""
-        frac = min(max(current_time / total_time, 0.0), 1.0) if total_time > 0 else 1.0
-        filled = int(round(bar_len * frac))
-        bar = '■' * filled + '□' * (bar_len - filled)
-
-        sys.stdout.write(
-            f"\r{prefix}{bar} {frac*100:5.1f}%  t = {current_time:6.2f}/{total_time:.2f} s"
-        )
-        sys.stdout.flush()
-        if frac >= 1.0:
-            sys.stdout.write("\n")
 
 
     def set_dynamics(self, dynamics: Dynamics):
@@ -87,25 +73,30 @@ class Simulation():
         self.controls_path : str = self.root / "rockets" / self.controls.rocket_name / "data" / "sim_output" / "controls"
         
     
-    def dynamics_step(self, t: float, xhat: np.ndarray) -> np.ndarray:
-        """Perform a single dynamics step. Forward Euler method (no linearization).
+    def dynamics_step(self, t: float, xhat: np.ndarray, linearized: bool = False) -> np.ndarray:
+        """Perform a single dynamics step. Choose between linearized and full nonlinear dynamics.
 
         Args:
             t (float): Current time.
             xhat (np.ndarray): Current state vector.
+            linearized (bool): Whether to use linearized dynamics (xdot = Ax) or nonlinearized (xdot = f(x)). Default is False (nonlinearized).
 
         Returns:
             np.ndarray: Updated state vector after the dynamics step.
         """
-        self.dynamics.set_f(t, xhat)
-        f_subs = np.array(self.dynamics.f_subs_full, dtype=float).reshape(-1)
-        xhat = xhat + f_subs * self.dynamics.dt
+        if linearized:
+            A = self.dynamics.getA(t, xhat)
+            xdot = A @ xhat + self.dynamics.get_gravity_accel(xhat) + self.dynamics.get_thrust_accel(t)
+        else:
+            self.dynamics.set_f(t, xhat)
+            xdot = np.array(self.dynamics.f_subs_full, dtype=float).reshape(-1)
+        xhat = xhat + xdot * self.dynamics.dt
         xhat[6:10] /= np.linalg.norm(xhat[6:10])
 
         self.dynamics_states.append(xhat)
         self.dynamics_times.append(t)
-        if xhat[5] < 0:
-            print("Warning: Longitudinal velocity v3 is negative at time t =", t)
+        # if xhat[5] < 0:
+        #     print("Warning: Longitudinal velocity v3 is negative at time t =", t)
         return xhat
     
     
@@ -186,14 +177,17 @@ class Simulation():
         return xhat, u
     
 
-    def run_dynamics_simulation(self, rk4 : bool = False, file_name : str = None, show_progress: bool = True):
+    def run_dynamics_simulation(self, rk4 : bool = False, file_name : str = None, show_progress: bool = True, linearized: bool = False):
         """Run the dynamics simulation until t_estimated_apogee. Uses either RK4 or Forward Euler integration. Default is Forward Euler.
         
         Args:
             rk4 (bool): Whether to use RK4 integration method. Default is False (Forward Euler).
             file_name (str): File name to save the dynamics data as CSV after simulation. Don't need to include .csv extension.
             show_progress (bool): Whether to display a progress bar during the run. Default is True.
+            linearized (bool): Whether to use linearized dynamics (xdot = Ax) or nonlinearized (xdot = f(x)). Default is False (nonlinearized).
         """
+        assert rk4 != linearized, "Cannot use both RK4 and linearized dynamics. Please choose one."
+        
         if file_name is None:
             raise ValueError("Please provide a file name to save the dynamics data as CSV after simulation.")
 
@@ -211,7 +205,7 @@ class Simulation():
             if rk4:
                 xhat = self.dynamics_step_rk4(t, xhat)
             else:
-                xhat = self.dynamics_step(t, xhat)
+                xhat = self.dynamics_step(t, xhat, linearized=linearized)
             t += self.dynamics.dt
             if show_progress:
                 self._update_progress_bar(t, total_time, prefix="Dynamics ")
@@ -346,6 +340,7 @@ class Simulation():
         ang_vel: bool = True,
         lin_vel: bool = True,
         attitude: bool = True,
+        quaternion : bool = False,
         file_name : str = None,
     ):
         """Plot the state variables over time. Plots angular velocity, linear velocity, and attitude quaternion on separate subplots.\
@@ -387,13 +382,20 @@ class Simulation():
             axs[1].set_ylabel('Linear Velocity (m/s)')
             axs[1].legend()
         if attitude:
-            axs[2].plot(times, states[:, 6], label='qw')
-            axs[2].plot(times, states[:, 7], label='qx')
-            axs[2].plot(times, states[:, 8], label='qy')
-            axs[2].plot(times, states[:, 9], label='qz')
-            axs[2].set_title('Attitude Quaternion vs Time')
-            axs[2].set_xlabel('Time (s)')
-            axs[2].set_ylabel('Quaternion Components')
+            if quaternion:
+                axs[2].plot(times, states[:, 6], label='qw')
+                axs[2].plot(times, states[:, 7], label='qx')
+                axs[2].plot(times, states[:, 8], label='qy')
+                axs[2].plot(times, states[:, 9], label='qz')
+                axs[2].set_title('Attitude Quaternion vs Time')
+                axs[2].set_ylabel('Quaternion Components')
+                axs[2].set_xlabel('Time (s)')
+            else:
+                euler_angles = np.array([self.dynamics.quat_to_euler_xyz(q) for q in states[:, 6:10]])
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 0]), label='Pitch (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 1]), label='Yaw (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 2]), label='Roll (deg)')
+                axs[2].set_title('Attitude Euler Angles vs Time')
             axs[2].legend()
             
         # Plot vertical line at motor burnout time
@@ -403,9 +405,7 @@ class Simulation():
                 ax.legend()
                 ax.grid(True, which='both', linestyle='--', linewidth=0.5)
         
-        plt.grid()
-        plt.tight_layout()
-        plt.show()
+        return fig, axs
 
 
     def plot_controls(
@@ -470,18 +470,16 @@ class Simulation():
                 axs[2].plot(times, states[:, 8], label='qy')
                 axs[2].plot(times, states[:, 9], label='qz')
                 axs[2].set_title('Attitude Quaternion vs Time')
+                axs[2].set_ylabel('Quaternion Components')
             else:
                 # Convert quaternions to Euler angles for plotting
                 euler_angles = np.array([self.controls.quat_to_euler_xyz(q) for q in states[:, 6:10]])
-                axs[2].plot(times, np.rad2deg(euler_angles[:, 0]), label='Roll (deg)')
-                axs[2].plot(times, np.rad2deg(euler_angles[:, 1]), label='Pitch (deg)')
-                axs[2].plot(times, np.rad2deg(euler_angles[:, 2]), label='Yaw (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 0]), label='Pitch (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 1]), label='Yaw (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 2]), label='Roll (deg)')
                 axs[2].set_title('Attitude Euler Angles vs Time')
-            axs[2].set_xlabel('Time (s)')
-            if quaternion:
-                axs[2].set_ylabel('Quaternion Components')
-            else:
                 axs[2].set_ylabel('Euler Angles (degrees)')
+            axs[2].set_xlabel('Time (s)')
             axs[2].legend()
         if control_inputs:
             axs[3].plot(times, np.rad2deg(inputs[:, 0]), label='u1 (deg)')
@@ -502,27 +500,96 @@ class Simulation():
         if self.controls.t_motor_burnout is not None:
             for ax in axs:
                 ax.axvline(x=self.controls.t_motor_burnout, color='r', linestyle='--', label='Motor Burnout')
+                ax.axvline(x=self.controls.t_launch_rail_clearance, color = 'b', linestyle='--', label="Launch Rail Clearance")
                 ax.legend()
                 ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-        plt.tight_layout()
-        plt.show()
+        
+        return fig, axs
         
     
-    def compare_dyn_or(self, dyn_file_name: str, or_path: str):
+    def compare_controls_dynamics(
+        self,
+        ang_vel: bool = True,
+        lin_vel: bool = True,
+        attitude: bool = True,
+        quaternion: bool = False,
+        control_inputs: bool = True,
+        control_moments : bool = True,
+        controls_file_name : str = None,
+        dyanmics_file_name : str = None
+    ):
+        fig, axs = self.plot_controls(
+            ang_vel=ang_vel,
+            lin_vel=lin_vel,
+            attitude=attitude,
+            quaternion=quaternion,
+            control_inputs=control_inputs,
+            control_moments=control_moments,
+            file_name=controls_file_name)
+        print(f"Using dynamics data from {dyanmics_file_name}.csv for plotting.")
+        states = None
+        times = None
+        if dyanmics_file_name is not None:
+            times, states = self.read_dynamics_from_csv(dyanmics_file_name)
+            if len(states) == 0:
+                raise ValueError("No dynamics data to plot. Please run the dynamics simulation first using run_dynamics_simulation() and save to CSV using save_dynamics_to_csv().")
+        else:
+            if len(self.dynamics_states) == 0:
+                raise ValueError("No dynamics data to plot. Please run the dynamics simulation first using run_dynamics_simulation().")
+            states = np.array(self.dynamics_states)
+            times = np.array(self.dynamics_times)
+            
+        if ang_vel:
+            # axs[0].plot(times, states[:, 0], label='dyn ω1')
+            # axs[0].plot(times, states[:, 1], label='dyn ω2')
+            axs[0].plot(times, states[:, 2], label='dyn ω3')
+            axs[0].legend()
+        if lin_vel:
+            # axs[1].plot(times, states[:, 3], label='dyn v1')
+            # axs[1].plot(times, states[:, 4], label='dyn v2')
+            axs[1].plot(times, states[:, 5], label='dyn v3')
+            axs[1].legend()
+        if attitude:
+            if quaternion:
+                axs[2].plot(times, states[:, 6], label='qw')
+                axs[2].plot(times, states[:, 7], label='qx')
+                axs[2].plot(times, states[:, 8], label='qy')
+                axs[2].plot(times, states[:, 9], label='qz')
+            else:
+                euler_angles = np.array([self.controls.quat_to_euler_xyz(q) for q in states[:, 6:10]])
+                # axs[2].plot(times, np.rad2deg(euler_angles[:, 0]), label='dyn Pitch (deg)')
+                # axs[2].plot(times, np.rad2deg(euler_angles[:, 1]), label='dyn Yaw (deg)')
+                axs[2].plot(times, np.rad2deg(euler_angles[:, 2]), label='dyn Roll (deg)')
+            axs[2].legend()
+            
+        plt.tight_layout()
+        plt.show()
+            
+        return fig, axs
+
+        
+    
+    def compare_dyn_or(self, dyn_file_name: str, or_file_path: str):
         """Compare simulation results with OpenRocket data.
+        Ensure that the OpenRocket data file contains the required columns:
+        Time (s), Vertical Speed (m/s), Total velocity (m/s), Roll rate (°/s).
 
         Args:
             dyn_file_name (str): File name to read the dynamics CSV file. Don't need to include .csv extension.
-            or_path (str): Path to the OpenRocket CSV data file.
+            or_file_path (str): Path to the OpenRocket CSV data file.
         """
-        print("Please ensure that the OpenRocket data file contains the following columns:")
-        print("Time (s), Vertical Speed (m/s), Total velocity (m/s), Roll rate (°/s)")        
         # Load OpenRocket data
-        or_data = pd.read_csv(or_path)
+        or_data = pd.read_csv(or_file_path)
         or_time = or_data['# Time (s)']
-        or_v3 = or_data['Vertical Speed (m/s)']
+        or_v3 = or_data['Vertical velocity (m/s)']
         or_vmag = or_data['Total velocity (m/s)']
         or_w3 = or_data['Roll rate (°/s)'] * (np.pi / 180.0) # Convert to rad/s
+        
+        apogee = or_v3 >= 0
+        or_time = or_time[apogee]
+        or_v3 = or_v3[apogee]
+        or_vmag = or_vmag[apogee]
+        or_w3 = or_w3[apogee]
         
         # Extract simulation altitude data
         sim_times, sim_states = self.read_dynamics_from_csv(dyn_file_name)
@@ -539,8 +606,8 @@ class Simulation():
         axs[0].set_ylabel('Vertical Velocity (m/s)')
         axs[0].legend()
 
-        axs[1].plot(or_time, or_vmag, label='OpenRocket vMag')
-        axs[1].plot(sim_times, sim_vmag, label='Simulation vMag')
+        axs[1].plot(or_time, or_vmag, label='OpenRocket ||v||')
+        axs[1].plot(sim_times, sim_vmag, label='Simulation ||v||')
         axs[1].set_title('Total Velocity Comparison')
         axs[1].set_xlabel('Time (s)')
         axs[1].set_ylabel('Total Velocity (m/s)')
@@ -552,10 +619,21 @@ class Simulation():
         axs[2].set_xlabel('Time (s)')
         axs[2].set_ylabel('Roll Rate (rad/s)')
         axs[2].legend()
+        
+        # Plot vertical line at motor burnout time
+        if self.dynamics.t_motor_burnout is not None:
+            for ax in axs:
+                ax.axvline(x=self.dynamics.t_motor_burnout, color='r', linestyle='--', label='Motor Burnout')
+                ax.axvline(x=self.dynamics.t_launch_rail_clearance, color = 'b', linestyle='--', label="Launch Rail Clearance")
+                ax.legend()
+                ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+
         plt.tight_layout()
         plt.show()
         
         print("If results don't match closely, ensure that the rocket configuration and simulation parameters are consistent between OpenRocket and this simulation.")
+        
+        return fig, axs
 
 
     def reset_logs(self):
@@ -577,8 +655,23 @@ class Simulation():
         self.controls_input_moments = []
         self.controls_times = []
 
-    
-    def var_list_to_str(self, var_list: list) -> list:
+
+    def _update_progress_bar(self, current_time: float, total_time: float, prefix: str = "", bar_len: int = 30):
+        """Render an in-place progress bar for long-running loops."""
+        frac = min(max(current_time / total_time, 0.0), 1.0) if total_time > 0 else 1.0
+        filled = int(round(bar_len * frac))
+        bar = '■' * filled + '□' * (bar_len - filled)
+
+        sys.stdout.write(
+            f"\r{prefix}{bar} {frac*100:5.1f}%  t = {current_time:6.2f}/{total_time:.2f} s"
+        )
+        sys.stdout.flush()
+        if frac >= 1.0:
+            sys.stdout.write("\n")
+
+
+    @staticmethod
+    def var_list_to_str(var_list: list) -> list:
         """Convert a list of sympy variables to their string representations.
 
         Args:

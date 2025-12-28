@@ -183,42 +183,6 @@ class Controls(Dynamics):
         return A_num, B_num
 
 
-    def get_thrust_accel(self, t: float):
-        """Get the thrust acceleration at time t.
-
-        Args:
-            t (float): The time in seconds.
-
-        Returns:
-            np.array: The thrust acceleration vector as a numpy array.
-        """
-        thrust = self.get_thrust(t)
-        m = self.get_mass(t)
-        a_thrust = np.zeros(10)
-        a_thrust[3] = thrust[0] / m
-        a_thrust[4] = thrust[1] / m
-        a_thrust[5] = thrust[2] / m
-        return a_thrust
-
-
-    def get_gravity_accel(self, xhat: np.array):
-        """Get the gravity acceleration in body frame at time t.
-
-        Args:
-            xhat (np.array): The current state estimate as a numpy array.
-
-        Returns:
-            np.array: The gravity acceleration vector as a numpy array.
-        """
-        g = np.array([0.0, 0.0, -self.g])
-        qw, qx, qy, qz = xhat[6], xhat[7], xhat[8], xhat[9]
-        R_world_to_body = np.array(self.R_BW_from_q(qw, qx, qy, qz)).astype(np.float64)
-        g_body = R_world_to_body @ g
-        a_gravity = np.zeros(10)
-        a_gravity[3:6] = g_body
-        return a_gravity
-
-
     def get_C(self, xhat: np.ndarray):
         """Compute the control input based on the current state, estimated state, and gain matrix.
 
@@ -272,6 +236,4 @@ class Controls(Dynamics):
             K (Callable): Function that takes in time and state, and returns the gain matrix.
         """
         self.K = K
-    
-    
     

@@ -3,3 +3,17 @@ with all necessary folders, fill-in-the-blank type Jupyter noteobok
 created automatically. 
 
 Create getters for rocket params
+
+Write silsim.py into a general SIL sim template, user defined
+rocket params (user define key functinos of SilSim class as 
+required by RocketPy, ideally should just import from
+RocketGeometry.py and fin.py when fully defining SilSim class
+in a Jupyter Notebook for instance)
+
+Understand wtf is going on with the sensors, provide template
+for sensor fusion maybe? Just create a Sensor class to house
+all sensor tools necessary to create an accurate sensor model.
+
+Address var_list_to_str issue, don't rely on state variables to
+read the csv file, just read the headers instead of requiring 
+a dynamics object or controls object for variable names.

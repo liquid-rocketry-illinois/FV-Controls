@@ -1,5 +1,5 @@
 import numpy as np
-from rocketpy.rocket.aero_surface.fins.trapezoidal_fins import TrapezoidalFins
+from rocketpy.rocket.aero_surface import TrapezoidalFins, EllipticalFins
 from controls.controls import Controls
 
 class Fins(TrapezoidalFins):

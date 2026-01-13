@@ -94,7 +94,7 @@ class Dynamics:
         self.state_vars = [w1, w2, w3, v1, v2, v3, qw, qx, qy, qz]
         self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2]
         # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
-        self.t_sym = t_sym
+        self.t_sym = t_sym # Time when rocket leaves the launch rail
 
 
     ## Helper function to print thrust curve ##
@@ -520,7 +520,7 @@ class Dynamics:
         D = C_d * 1/2 * rho * v_mag**2 * A # Drag force using constant drag coefficient
         Fd : Matrix = -D * vhat # Drag force vector
 
-        ## Lift Force ##
+        ## Lift Force ## beta gives direction of the angle of attack to componentize lift, AoA is the direct angle of attack
         eps_beta = Float(1e-9)
         nan_guard = sqrt(v1**2 + v2**2 + eps_beta**2)
         beta = 2 * atan2(v2, nan_guard + v1) # Equivalent to atan2(v2, v1) but avoids NaN at (0,0)

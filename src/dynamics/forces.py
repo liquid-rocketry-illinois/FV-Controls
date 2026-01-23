@@ -9,3 +9,5 @@ import os
 class Forces():
     def __init__(self):
         self.forcename = ""
+
+        self.g = 9.81

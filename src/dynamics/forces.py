@@ -12,6 +12,7 @@ class Forces():
 
         self.g = 9.81
         self.f : Matrix = None
+        
 
 
 

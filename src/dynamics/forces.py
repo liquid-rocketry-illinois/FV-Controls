@@ -8,6 +8,8 @@ import os
 
 class Forces():
     def __init__(self):
+        """Initialize the Forces class. Rocket body axis is aligned with z-axis.
+        """
         self.forcename = ""
 
         self.g = 9.81
@@ -17,7 +19,7 @@ class Forces():
 
 
         self.f = sum() # Sum of forces 
-
+ 
     def get_thrust(self, t: float) -> Matrix:
         """Get the thrust for the rocket at time t.
 

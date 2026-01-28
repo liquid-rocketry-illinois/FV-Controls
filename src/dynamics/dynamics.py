@@ -3,7 +3,9 @@ import numpy as np
 import pandas as pd
 from typing import Callable
 
-class Dynamics:
+import moments
+
+class Dynamics(MomentsForces):
     def __init__(self, rocket_name : str):
         """Initialize the Dynamics class. Rocket body axis is aligned with z-axis.
 
@@ -12,6 +14,8 @@ class Dynamics:
             dt (float): Time step for simulation in seconds.
             x0 (np.ndarray): Initial state vector.
         """
+        
+        super.__init__()
 
         self.f : Matrix = None
         self.state_vars : list = None

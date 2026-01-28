@@ -6,7 +6,7 @@ import pandas as pd
 from enum import Enum
 import os
 
-class Moments():
+class MomentsForces:
     def __init__(self):
         self.M = None
 

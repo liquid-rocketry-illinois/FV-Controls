@@ -23,7 +23,6 @@ class MomentsForces(Thrust):
         self.f : Matrix = None
         self.state_vars : list = None
 
-        self.Cnalpha_fin : float = None # Normal FORCE coefficient normalized by angle of attack for 1 fin
 
     def set_forces(self) -> Matrix:
         """Get the forces for the rocket. Sets self.F.

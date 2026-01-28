@@ -37,7 +37,7 @@ class Dynamics(MomentsForces, Thrust):
         self.x_CG_0 : float = None # Initial center of gravity location in meters
         self.x_CG_f : float = None # Final center of gravity location in meters
 
-        
+
         self.m_0 : float = None # Initial rocket mass in kg
         self.m_f : float = None # Final rocket mass in kg
         self.m_p : float = None # Propellant mass in kg
@@ -56,6 +56,8 @@ class Dynamics(MomentsForces, Thrust):
         self.Ct : float = None # Tip chord in meters
         self.s : float = None # Span in meters
         self.delta : float = None # Fin cant angle in degrees
+        self.Cnalpha_fin : float = None # Normal FORCE coefficient normalized by angle of attack for 1 fin
+
         
         # Rocket name (used for saving simulation results from Simluation() object to designated path)
         self.rocket_name = rocket_name

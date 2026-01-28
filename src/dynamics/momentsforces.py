@@ -7,8 +7,9 @@ from enum import Enum
 import os
 
 from thrust import Thrust
+from speedsmass import SpeedMass
 
-class MomentsForces(Thrust):
+class MomentsForces(Thrust,SpeedMass):
     def __init__(self):
         self.M = None
 

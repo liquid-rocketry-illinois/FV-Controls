@@ -5,8 +5,9 @@ from typing import Callable
 
 from momentsforces import MomentsForces
 from thrust import Thrust
+from speedsmass import SpeedMass
 
-class Dynamics(MomentsForces, Thrust):
+class Dynamics(MomentsForces):
     def __init__(self, rocket_name : str):
         """Initialize the Dynamics class. Rocket body axis is aligned with z-axis.
 

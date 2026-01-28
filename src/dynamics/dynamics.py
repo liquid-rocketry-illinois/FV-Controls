@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import Callable
 
-import moments
+from momentsforces import MomentsForces
 
 class Dynamics(MomentsForces):
     def __init__(self, rocket_name : str):
@@ -14,7 +14,7 @@ class Dynamics(MomentsForces):
             dt (float): Time step for simulation in seconds.
             x0 (np.ndarray): Initial state vector.
         """
-        
+
         super.__init__()
 
         self.f : Matrix = None
@@ -58,11 +58,6 @@ class Dynamics(MomentsForces):
         # Thrust curve data
         self.thrust_times : np.ndarray = None
         self.thrust_forces : np.ndarray = None
-
-        # Environmental parameters
-        self.v_wind : list = [0.0, 0.0]
-        self.rho : float = 1.225 # Air density kg/m^3
-        self.g : float = 9.81 # Gravitational acceleration m/s^2
         
         # Rocket name (used for saving simulation results from Simluation() object to designated path)
         self.rocket_name = rocket_name

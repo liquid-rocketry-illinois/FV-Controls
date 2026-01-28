@@ -10,6 +10,11 @@ class MomentsForces:
     def __init__(self):
         self.M = None
 
+        # Environmental parameters
+        self.v_wind : list = [0.0, 0.0]
+        self.rho : float = 1.225 # Air density kg/m^3
+        self.g : float = 9.81 # Gravitational acceleration m/s^2
+
 
     def set_moments(self) -> Matrix:
         """Get the moments for the rocket.

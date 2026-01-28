@@ -15,6 +15,9 @@ class MomentsForces:
         self.rho : float = 1.225 # Air density kg/m^3
         self.g : float = 9.81 # Gravitational acceleration m/s^2
 
+        self.F : Matrix = None # Forces matrix
+        self.M : Matrix = None # Moments matrix
+
 
     def set_moments(self) -> Matrix:
         """Get the moments for the rocket.

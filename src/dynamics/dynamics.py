@@ -13,6 +13,7 @@ class Dynamics(MomentsForces):
             t_estimated_apogee (float): Estimated time until apogee in seconds.
             dt (float): Time step for simulation in seconds.
             x0 (np.ndarray): Initial state vector.
+            [Refer to super for other - Jed]
         """
 
         super.__init__()
@@ -66,9 +67,7 @@ class Dynamics(MomentsForces):
         self.A_sym : Matrix = None # Symbolic state matrix
         self.A : np.ndarray = None # State matrix
         
-        ## Helpers ##
-        self.F : Matrix = None # Forces matrix
-        self.M : Matrix = None # Moments matrix
+        ## Helpers [Refer to super for other]##
         self._f_numeric = None  # Cached lambdified EOM
         self._A_numeric = None  # Cached lambdified Jacobian of f wrt state
 

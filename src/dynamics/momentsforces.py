@@ -2,7 +2,7 @@ import sympy as sp
 from sympy import *
 import numpy as np
 import pandas as pd
-# from typing import Callable
+from typing import Callable
 from enum import Enum
 import os
 
@@ -185,3 +185,11 @@ class MomentsForces(Thrust):
         """
         self.set_moments()
         return self.M
+    
+
+x = MomentsForces()
+x.set_moments()
+x.set_forces()
+print(x.get_forces(),x.get_moments())
+print("ssdfds")
+

@@ -6,8 +6,8 @@ from typing import Callable
 from enum import Enum
 import os
 
-from thrust import Thrust
-from variables import Variables
+# from dynamics.thrust import Thrust
+from dynamics.variables import Variables
 
 class MomentsForces(Variables):
     def __init__(self):
@@ -268,9 +268,10 @@ class MomentsForces(Variables):
         print("your_object_name.setThrustCurve(thrust_times=thrust_times, thrust_forces=thrust_forces)")
     
 
-x = MomentsForces()
-x.set_moments()
-x.set_forces()
-print(x.get_forces(),x.get_moments())
-print("ssdfds")
+if __name__ == "__main__":
+    x = MomentsForces()
+    x.set_moments()
+    x.set_forces()
+    print(x.get_forces(),x.get_moments())
+    print("ssdfds")
 

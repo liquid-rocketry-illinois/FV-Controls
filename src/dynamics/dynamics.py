@@ -235,7 +235,7 @@ class Dynamics(MomentsForces):
         I_long = self.I_0 - (self.I_0 - self.I_f) / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.I_f
         I = [I_long, I_long, self.I_3]
 
-        return If
+        return I
 
     
     def get_CG(self, t: float) -> float:

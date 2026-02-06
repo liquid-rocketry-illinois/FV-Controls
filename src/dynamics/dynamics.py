@@ -18,8 +18,9 @@ class Dynamics(MomentsForces):
             [Refer to super for other - Jed]
         """
 
+        super().__init__()
 
-        self.params : list = None
+        
         self.f_subs_params : Matrix = None
         self.f_subs_full : Matrix = None
         self.dt : float = None
@@ -69,32 +70,31 @@ class Dynamics(MomentsForces):
         self._f_numeric = None  # Cached lambdified EOM
         self._A_numeric = None  # Cached lambdified Jacobian of f wrt state
 
-        super().__init__()
 
         self.rocket_name = rocket_name
 
+# Move to m-f
+    # def set_symbols(self):
+    #     """Set the symbolic variables for the dynamics equations.
+    #     """
+    #     w1, w2, w3, v1, v2 = symbols('w_1 w_2 w_3 v_1 v_2', real = True) # Angular and linear velocities
+    #     v3 = symbols('v_3', real = True, positive = True) # Longitudinal velocity, assumed positive during flight
+    #     qw, qx, qy, qz = symbols('q_w q_x q_y q_z', real = True) # Quaternion components
+    #     I1, I2, I3 = symbols('I_1 I_2 I_3', real = True, positive = True) # Moments of inertia
+    #     T1, T2, T3 = symbols('T_1 T_2 T_3', real = True, positive = True) # Thrusts
+    #     mass, rho, d, g, CG = symbols('m rho d g CG', real = True, positive = True) # Mass, air density, diameter, gravity, center of gravity
+    #     delta = symbols('delta', real = True) # Fin cant angle
+    #     C_d = symbols('C_d', real = True, positive = True) # Drag coefficient
+    #     Cnalpha_fin, Cnalpha_rocket = symbols('C_n_alpha_fin C_n_alpha_rocket', real = True, positive = True) # Fin and rocket normal force coefficient derivatives
+    #     Cr, Ct, s = symbols('Cr Ct s', real = True, positive = True) # Fin root chord, tip chord, span
+    #     N = symbols('N', real = True, positive = True) # Number of fins
+    #     t_sym = symbols('t', real = True, positive = True) # Time symbol for Heaviside function
+    #     v_wind1, v_wind2 = symbols('v_wind_1 v_wind_2', real = True) # Wind velocity components
 
-    def set_symbols(self):
-        """Set the symbolic variables for the dynamics equations.
-        """
-        w1, w2, w3, v1, v2 = symbols('w_1 w_2 w_3 v_1 v_2', real = True) # Angular and linear velocities
-        v3 = symbols('v_3', real = True, positive = True) # Longitudinal velocity, assumed positive during flight
-        qw, qx, qy, qz = symbols('q_w q_x q_y q_z', real = True) # Quaternion components
-        I1, I2, I3 = symbols('I_1 I_2 I_3', real = True, positive = True) # Moments of inertia
-        T1, T2, T3 = symbols('T_1 T_2 T_3', real = True, positive = True) # Thrusts
-        mass, rho, d, g, CG = symbols('m rho d g CG', real = True, positive = True) # Mass, air density, diameter, gravity, center of gravity
-        delta = symbols('delta', real = True) # Fin cant angle
-        C_d = symbols('C_d', real = True, positive = True) # Drag coefficient
-        Cnalpha_fin, Cnalpha_rocket = symbols('C_n_alpha_fin C_n_alpha_rocket', real = True, positive = True) # Fin and rocket normal force coefficient derivatives
-        Cr, Ct, s = symbols('Cr Ct s', real = True, positive = True) # Fin root chord, tip chord, span
-        N = symbols('N', real = True, positive = True) # Number of fins
-        t_sym = symbols('t', real = True, positive = True) # Time symbol for Heaviside function
-        v_wind1, v_wind2 = symbols('v_wind_1 v_wind_2', real = True) # Wind velocity components
-
-        self.state_vars = [w1, w2, w3, v1, v2, v3, qw, qx, qy, qz]
-        self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2]
-        # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
-        self.t_sym = t_sym # Time when rocket leaves the launch rail
+    #     self.state_vars = [w1, w2, w3, v1, v2, v3, qw, qx, qy, qz]
+    #     self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2]
+    #     # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
+    #     self.t_sym = t_sym # Time when rocket leaves the launch rail
 
 
 
@@ -235,7 +235,7 @@ class Dynamics(MomentsForces):
         I_long = self.I_0 - (self.I_0 - self.I_f) / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.I_f
         I = [I_long, I_long, self.I_3]
 
-        return I
+        return If
 
     
     def get_CG(self, t: float) -> float:
@@ -289,7 +289,7 @@ class Dynamics(MomentsForces):
             theta: rotation about x (pitch)
             phi:   rotation about y (yaw)
             psi:   rotation about z (roll)
-        Such that: R = Rz(psi) @ Ry(phi) @ Rx(theta)
+        Such that: R = Rz(psi) @ Ry(phi) @ Rx(theta) [INTRISIC]
 
         Args:
             q (array-like): Quaternion [w, x, y, z].
@@ -395,7 +395,7 @@ class Dynamics(MomentsForces):
             Matrix: The rotation matrix from world to body frame.
         """
         s = (qw**2 + qx**2 + qy**2 + qz**2)**-Rational(1,2) # Normalizing factor
-        qw, qx, qy, qz = qw*s, qx*s, qy*s, qz*s # Normalized quaternion components
+        qw, qx, qy, qz = qw*s, qx*s, qy*s, qz*s # Normalized quaternion components. Since quaternions are unit vectors
 
         xx,yy,zz = qx*qx, qy*qy, qz*qz
         wx,wy,wz = qw*qx, qw*qy, qw*qz
@@ -515,7 +515,7 @@ class Dynamics(MomentsForces):
 
 
     def _compile_numeric_funcs(self):
-        """Lazily lambdify EOM for fast numeric evaluation."""
+        """Lazily lambdify EOM for fast numeric evaluation. Eigenvalues???"""
         if self._f_numeric is not None:
             return
         if self.f is None or self.state_vars is None:
@@ -539,7 +539,7 @@ class Dynamics(MomentsForces):
 
 
     def _compile_A_funcs(self):
-        """Lazily lambdify Jacobian of the EOM w.r.t. state for fast A-matrix evaluation."""
+        """Lazily lambdify Jacobian of the EOM with respect to state for fast A-matrix evaluation."""
         if self._A_numeric is not None:
             return
         if self.f is None or self.state_vars is None:
@@ -593,43 +593,6 @@ class Dynamics(MomentsForces):
         self.A = A_num
 
         return A_num
-    
-    
-    def get_thrust_accel(self, t: float):
-        """Get the thrust acceleration at time t.
-
-        Args:
-            t (float): The time in seconds.
-
-        Returns:
-            np.array: The thrust acceleration vector as a numpy array.
-        """
-        thrust = self.get_thrust(t)
-        m = self.get_mass(t)
-        a_thrust = np.zeros(10)
-        a_thrust[3] = thrust[0] / m
-        a_thrust[4] = thrust[1] / m
-        a_thrust[5] = thrust[2] / m
-        return a_thrust
-
-
-    def get_gravity_accel(self, xhat: np.array):
-        """Get the gravity acceleration in body frame at time t.
-
-        Args:
-            xhat (np.array): The current state estimate as a numpy array.
-
-        Returns:
-            np.array: The gravity acceleration vector as a numpy array.
-        """
-        g = np.array([0.0, 0.0, -self.g])
-        qw, qx, qy, qz = xhat[6], xhat[7], xhat[8], xhat[9]
-        R_world_to_body = np.array(self.R_BW_from_q(qw, qx, qy, qz)).astype(np.float64)
-        g_body = R_world_to_body @ g
-        a_gravity = np.zeros(10)
-        a_gravity[3:6] = g_body
-        return a_gravity
-
       
 # For testing
 def main():

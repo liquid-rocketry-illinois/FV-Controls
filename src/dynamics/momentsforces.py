@@ -7,13 +7,15 @@ from enum import Enum
 import os
 
 # from dynamics.thrust import Thrust
-from dynamics.variables import Variables
+# from dynamics.variables import Variables
 
-class MomentsForces(Variables):
+class MomentsForces():
     def __init__(self):
-        super().__init__()
+        # super().__init__()
 
         self.M = None
+
+        self.params : list = None
 
         # Environmental parameters
         self.v_wind : list = [0.0, 0.0]
@@ -29,6 +31,67 @@ class MomentsForces(Variables):
         # Thrust curve data
         self.thrust_times : np.ndarray = None
         self.thrust_forces : np.ndarray = None
+
+    def set_symbols(self):
+        """Set the symbolic variables for the dynamics equations.
+        """
+        w1, w2, w3, v1, v2 = symbols('w_1 w_2 w_3 v_1 v_2', real = True) # Angular and linear velocities
+        v3 = symbols('v_3', real = True, positive = True) # Longitudinal velocity, assumed positive during flight
+        qw, qx, qy, qz = symbols('q_w q_x q_y q_z', real = True) # Quaternion components
+        # I1, I2, I3 = symbols('I_1 I_2 I_3', real = True, positive = True) # Moments of inertia
+        T1, T2, T3 = symbols('T_1 T_2 T_3', real = True, positive = True) # Thrusts
+        mass, rho, d, g, CG = symbols('m rho d g CG', real = True, positive = True) # Mass, air density, diameter, gravity, center of gravity
+        delta = symbols('delta', real = True) # Fin cant angle
+        C_d = symbols('C_d', real = True, positive = True) # Drag coefficient
+        # Cnalpha_fin, Cnalpha_rocket = symbols('C_n_alpha_fin C_n_alpha_rocket', real = True, positive = True) # Fin and rocket normal force coefficient derivatives
+        # Cr, Ct, s = symbols('Cr Ct s', real = True, positive = True) # Fin root chord, tip chord, span
+        # N = symbols('N', real = True, positive = True) # Number of fins
+        t_sym = symbols('t', real = True, positive = True) # Time symbol for Heaviside function
+        # v_wind1, v_wind2 = symbols('v_wind_1 v_wind_2', real = True) # Wind velocity components
+
+        self.state_vars = [w1, w2, w3, v1, v2, v3, qw, qx, qy, qz]
+        # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2]
+        
+        self.params = [None, None, None, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, None, None, None, None, None, N, None, None]
+
+        # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
+        self.t_sym = t_sym # Time when rocket leaves the launch rail
+
+    def get_thrust_accel(self, t: float) -> np.ndarray:
+        """Get the thrust acceleration at time t. Does this by dividing thrusts by m.
+
+        Args:
+            t (float): The time in seconds.
+
+        Returns:
+            np.array: The thrust acceleration vector as a numpy array.
+        """
+        thrust = self.get_thrust(t)
+        m = self.get_mass(t)
+        a_thrust = np.zeros(10)
+        a_thrust[3] = thrust[0] / m
+        a_thrust[4] = thrust[1] / m
+        a_thrust[5] = thrust[2] / m
+        return a_thrust
+
+
+    def get_gravity_accel(self, xhat: np.array):
+        """Get the gravity acceleration in body frame at time t.
+
+        Args:
+            xhat (np.array): The current state estimate as a numpy array.
+
+        Returns:
+            np.array: The gravity acceleration vector as a numpy array.
+        """
+        g = np.array([0.0, 0.0, -self.g])
+        qw, qx, qy, qz = xhat[6], xhat[7], xhat[8], xhat[9]
+        R_world_to_body = np.array(self.R_BW_from_q(qw, qx, qy, qz)).astype(np.float64)
+        g_body = R_world_to_body @ g
+        a_gravity = np.zeros(10)
+        a_gravity[3:6] = g_body
+        return a_gravity
+
 
 
     def set_forces(self) -> Matrix:
@@ -209,7 +272,7 @@ class MomentsForces(Variables):
             t (float): The time in seconds.
 
         Returns:
-            dict: A dictionary containing inertia, mass, CG, and thrust at time t.
+            dict: A dictionary containing inertia, mass, CG, and thrust at time t. WRONG. We return T = [0.,0.,thrust]
         """
 
         T = Matrix([0., 0., 0.])  # N

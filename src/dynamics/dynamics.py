@@ -346,7 +346,7 @@ class Dynamics(MomentsForces):
         return theta, phi, psi
 
 
-    def euler_to_quat_xyz(self, theta, phi, psi, degrees=False):
+    def euler_to_quat_xyz(self, theta, phi, psi, degrees=False) -> np.ndarray:
         """
         Convert Euler angles to a quaternion using intrinsic XYZ:
             - theta: rotation about x (pitch)

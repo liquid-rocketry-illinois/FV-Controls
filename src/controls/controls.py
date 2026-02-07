@@ -44,7 +44,7 @@ class Controls(Dynamics):
 
     def set_symbols(self):
         """Set the symbolic variables for the control inputs. Supersedes the parent method to include control surface deflection angle.
-        If more control surfaces are added in the future, they should be included here. Simply append more symbols to self.input_vars.
+        If more control surfaces are added in the future, they should be included here. Simply append more symbols to self.input_vars. WHAT IS ZETA
         """
         super().set_symbols()
         

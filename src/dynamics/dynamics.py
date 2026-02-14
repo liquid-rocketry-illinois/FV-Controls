@@ -210,17 +210,6 @@ class Dynamics(MomentsForces):
                 raise ValueError(f"Parameter '{param}' is not set. Please set all necessary parameters before proceeding.")
     
     
-    def get_mass(self, t: float) -> float:
-        """Get the mass of the rocket at time t.
-
-        Args:
-            t (float): The time in seconds.
-
-        Returns:
-            float: The mass of the rocket at time t in kg.
-        """
-        mass_rocket = self.m_0 - self.m_p / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.m_f
-        return mass_rocket
 
 
     def get_inertia(self, t: float) -> list:

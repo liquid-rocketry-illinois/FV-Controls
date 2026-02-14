@@ -57,6 +57,18 @@ class MomentsForces():
         # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
         self.t_sym = t_sym # Time when rocket leaves the launch rail
 
+    def get_mass(self, t: float) -> float:
+        """Get the mass of the rocket at time t.
+
+        Args:
+            t (float): The time in seconds.
+
+        Returns:
+            float: The mass of the rocket at time t in kg.
+        """
+        mass_rocket = self.m_0 - self.m_p / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.m_f
+        return mass_rocket
+
     def get_thrust_accel(self, t: float) -> np.ndarray:
         """Get the thrust acceleration at time t. Does this by dividing thrusts by m.
 

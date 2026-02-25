@@ -14,6 +14,7 @@ class Sensor:
         """checks if enough time has passed to trigger a new sample"""
         return t >= (self.last_update_time + self.dt)
     
+    
 class IMU(Sensor):
     """IMU model (accelerometer + gyroscope)
     True State -> Misalignment/Scale -> Bias/Walk/Noise -> Check Saturation -> Quantization"""
@@ -59,6 +60,9 @@ class IMU(Sensor):
         self.bias_walk_accel = np.zeros(3)
         self.bias_walk_gyro = np.zeros(3)
 
+        self.saturation_warning_triggered = False 
+
+
     def extract_physics(self, rocket_state, derivatives):
         """gets ideal physical states from simulation
         args:
@@ -80,7 +84,30 @@ class IMU(Sensor):
         #IMU measure acceleration = kinematic accel - gravity (body)
         #need to rotate gravity vector [0, 0, -g] into body frame
         
-        g_body = ...
+        qw, qx, qy, qz = rocket_state[6:10]
+
+        #normalize quat to prevent drift
+        norm = np.sqrt(qw**2 + qx**2 + qy**2 + qz**2)
+        if norm > 0:
+            qw, qx, qy, qz = qw/norm, qx/norm, qy/norm, qz/norm
+
+        #rotation matrix, world to body
+        xx, yy, zz = qx*qx, qy*qy, qz*qz
+        wx, wy, wz = qw*qx, qw*qy, qw*qz
+        xy, xz, yz = qx*qy, qx*qz, qy*qz
+
+        #copy dynamics.py 
+        R = np.array([
+            [1 - 2*(yy + zz),   2*(xy - wz),       2*(xz + wy)],
+            [2*(xy + wz),       1 - 2*(xx + zz),   2*(yz - wx)],
+            [2*(xz - wy),       2*(yz + wx),       1 - 2*(xx + yy)]
+        ])
+
+        #grav vector in world frame
+        g_world = np.array([0,0, -self.g])
+        g_body = R @ g_world
+
+        #actual acceleration, what sensor feels
         true_accel = kinematic_accel - g_body
 
         return true_accel, true_gyro
@@ -104,7 +131,7 @@ class IMU(Sensor):
             New_Bias = Old_Bias + N(0, sigma * sqrt(dt))
             """
         if sigma_walk > 0: #ensure instability
-           step = np.random.normal(0, sigma_walk * np.sqrt(dt), 3) #takes 3 random numbers from gaussian distribution with mean 0, sqrt dt for random walk algo
+           step = np.random.normal(0, sigma_walk * np.sqrt(dt), 3) #takes 3 random numbers from gaussian distribution with mean 0
            return current_walk+step
         return current_walk #just return if std dev of instability is 0
 
@@ -119,9 +146,11 @@ class IMU(Sensor):
 
 
     def check_lims(self, vec, max_val):
-        "cuts the signal to the sensors range"
+        """cuts the signal to the sensors range"""
         if np.any(np.abs(vec) > max_val):
-            print(f"SENSOR HAS SATURATED, VALUE: {vec} EXCEEDS {max_val}") #change this to a flag so it doens't spam console 
+            if not self.saturation_warning_triggered:
+                print(f"SENSOR HAS SATURATED, VALUE: {vec} EXCEEDS {max_val}")
+                self.saturation_warning_triggered = True
         return np.clip(vec, -max_val, max_val)
     
     def quantize(self, vec, lsb):
@@ -148,7 +177,7 @@ class IMU(Sensor):
         self.bias_walk_gyro = self.update_random_walk(self.bias_walk_gyro, self.gyro_walk_sigma, self.dt)
 
         #for accelerometer
-        a_det = self._apply_deterministic_errors(a_true, self.scale_factor, self.misalignment, self.static_bias_accel)
+        a_det = self.apply_deterministic_errors(a_true, self.scale_factor, self.misalignment, self.static_bias_accel)
         a_stoch = self.add_stochastic_noise(a_det, self.bias_walk_accel, self.accel_std)
         a_sat = self.check_lims(a_stoch, self.accel_max)
         a_dig = self.quantize(a_sat, self.accel_lsb)

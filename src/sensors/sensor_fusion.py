@@ -26,7 +26,7 @@ class SensorFusion:
 
 
         """Because controls class has the f_numeric(t, x, u) method, which evaluates the 
-        full nonlinear equations of motion, we don't need to piece 
+        full nonlinear equations of motion, we dont need to piece 
         together gravity and thrust using Ax + B - we can just pass the state 
         directly into the nonlinear physics engine for a more accurate 
         prediction, while reserving the Jacobians (get_AB) just for the 

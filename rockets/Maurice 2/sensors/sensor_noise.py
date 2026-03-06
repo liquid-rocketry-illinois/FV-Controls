@@ -48,7 +48,7 @@ with open("/Users/dsong/Library/CloudStorage/OneDrive-UniversityofIllinois-Urban
         line = str(line)
         line = line.replace("\x00", "")
         ar = line.split("|")
-        # if "sensor" in line:
+        # if "sensor" in line: 
         #     allData.append(curList)
         #     curList = []
         if(len(ar) > 5):

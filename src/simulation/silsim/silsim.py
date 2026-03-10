@@ -1,12 +1,16 @@
-# import os, sys
-# PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# if PROJECT_ROOT not in sys.path:
-#     sys.path.insert(0, PROJECT_ROOT)
-# from pathlib import Path
+import os, sys
+
+# Add src directory to path for imports
+SRC_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+
+print(SRC_PATH)
+
+from pathlib import Path
 
 import numpy as np
 import csv
-from pathlib import Path
 
 from typing import Callable
 from rocketpy import Flight
@@ -349,57 +353,58 @@ class SilSim:
         print(f"Exported SIL simulation states to: {path}")
 
         
-# # Run SIL simulation, export flight data to CSV
-# def main():
-#     ## Define gain matrix ##
-#     K_pre_max = 1.0e-1
-#     K_pre_min = 5.0e-4
-#     # K_pre_max = 5.0e-1
-#     # K_pre_min = 5.0e-1
-#     # K_post_max = 5.0e-1
-#     # K_post_min = 5.0e-1
-#     K_post_max = 1.0e-1
-#     K_post_min = 5.0e-3
+# Run SIL simulation, export flight data to CSV
+def main():
+    ## Define gain matrix ##
+    K_pre_max = 1.0e-1
+    K_pre_min = 5.0e-4
+    # K_pre_max = 5.0e-1
+    # K_pre_min = 5.0e-1
+    # K_post_max = 5.0e-1
+    # K_post_min = 5.0e-1
+    K_post_max = 1.0e-1
+    K_post_min = 5.0e-3
 
-#     pre_width = 3
-#     post_width = 8
+    pre_width = 3
+    post_width = 8
 
-#     pre_v3_mid = 100.0
-#     post_v3_mid = 90.0
+    pre_v3_mid = 100.0
+    post_v3_mid = 90.0
 
-#     # pre_w3_mid = 0.35
-#     # post_w3_mid = 0.5
+    # pre_w3_mid = 0.35
+    # post_w3_mid = 0.5
 
-#     ## Define initial conditions ##
-#     xhat0 = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]) # Initial state estimate
-#     u0 = np.array([np.deg2rad(-0.0)])  # Initial control input
-#     sampling_rate = 40.0  # Hz
-#     dt = 1.0 / sampling_rate
+    ## Define initial conditions ##
+    xhat0 = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]) # Initial state estimate
+    u0 = np.array([np.deg2rad(-0.0)])  # Initial control input
+    sampling_rate = 40.0  # Hz
+    dt = 1.0 / sampling_rate
 
-#     controller = Controls(dt=dt, x0=xhat0, u0=u0, t_launch_rail_clearance=0.308)
-#     controller.setup_EOM()
-#     controller.set_K_params(K_pre_max=K_pre_max, K_pre_min=K_pre_min,
-#                             K_post_max=K_post_max, K_post_min=K_post_min,
-#                             pre_width=pre_width, post_width=post_width,
-#                             pre_v3_mid=pre_v3_mid, post_v3_mid=post_v3_mid)
-#     # controller.set_K_params(K_pre_max=K_pre_max, K_pre_min=K_pre_min,
-#     #                         K_post_max=K_post_max, K_post_min=K_post_min,
-#     #                         pre_width=pre_width, post_width=post_width,
-#     #                         pre_v3_mid=pre_w3_mid, post_v3_mid=post_w3_mid)
-#     # controller.buildL(lw=10.0, lqw=1.0, lqx=2.0, lqy=2.0, lqz=2.0)
-#     lw = 1e-3 # any higher makes the simulation unstable for some dumb reason
-#     lq = 1e-3
-#     controller.buildL(lw=lw, lqw=lq, lqx=lq, lqy=lq, lqz=lq)
-#     # controller.buildL(lw=40 , lqw=0.01, lqx=0.5, lqy=0.5, lqz=0.5)
-#     # controller.buildL(lw=5.0 , lqw=0.5, lqx=1, lqy=1, lqz=1)
-#     # controller.buildL(lw=0.0, lqw=0.0, lqx=0.0, lqy=0.0, lqz=0.0)
+    # controller = Controls(dt=dt, x0=xhat0, u0=u0, t_launch_rail_clearance=0.308)
+    controller = Controls(True, "h")
+    controller.define_eom()
+    controller.set_K_params(K_pre_max=K_pre_max, K_pre_min=K_pre_min,
+                            K_post_max=K_post_max, K_post_min=K_post_min,
+                            pre_width=pre_width, post_width=post_width,
+                            pre_v3_mid=pre_v3_mid, post_v3_mid=post_v3_mid)
+    # controller.set_K_params(K_pre_max=K_pre_max, K_pre_min=K_pre_min,
+    #                         K_post_max=K_post_max, K_post_min=K_post_min,
+    #                         pre_width=pre_width, post_width=post_width,
+    #                         pre_v3_mid=pre_w3_mid, post_v3_mid=post_w3_mid)
+    # controller.buildL(lw=10.0, lqw=1.0, lqx=2.0, lqy=2.0, lqz=2.0)
+    lw = 1e-3 # any higher makes the simulation unstable for some dumb reason
+    lq = 1e-3
+    controller.buildL(lw=lw, lqw=lq, lqx=lq, lqy=lq, lqz=lq)
+    # controller.buildL(lw=40 , lqw=0.01, lqx=0.5, lqy=0.5, lqz=0.5)
+    # controller.buildL(lw=5.0 , lqw=0.5, lqx=1, lqy=1, lqz=1)
+    # controller.buildL(lw=0.0, lqw=0.0, lqx=0.0, lqy=0.0, lqz=0.0)
 
-#     ## Run SIL simulation ##
-#     sim = SilSim(sampling_rate=sampling_rate, controller=controller)
-#     flight, controller = sim.run(sampling_rate=sampling_rate)
-#     sim.export_states()
+    ## Run SIL simulation ##
+    sim = SilSim(sampling_rate=sampling_rate, controller=controller)
+    flight, controller = sim.run(sampling_rate=sampling_rate)
+    sim.export_states()
     
 
-# if __name__ == "__main__":
-#     main()
-#     print("SIL simulation complete.")
+if __name__ == "__main__":
+    main()
+    print("SIL simulation complete.")

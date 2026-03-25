@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from rocketpy import Rocket; methods = [m for m in dir\\(Rocket\\) if ''fin'' in m.lower\\(\\) or ''surface'' in m.lower\\(\\) or ''aero'' in m.lower\\(\\) or ''controller'' in m.lower\\(\\)]; print\\(methods\\)\")",
+      "Bash(python -c \"from rocketpy import Rocket; import inspect; print\\(inspect.getsource\\(Rocket.add_surfaces\\)\\)\")",
+      "Bash(python -c \"from rocketpy import Rocket; import inspect; print\\(inspect.getsource\\(Rocket._add_controllers\\)\\)\")",
+      "Bash(python -c \"from rocketpy import Flight; import inspect; sig = inspect.signature\\(Flight.__init__\\); print\\(list\\(sig.parameters.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \"from rocketpy.control import _Controller; import inspect; sig = inspect.signature\\(_Controller.__init__\\); print\\(list\\(sig.parameters.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \"from rocketpy import Rocket; import inspect; print\\(inspect.getsource\\(Rocket.add_trapezoidal_fins\\)\\)\")",
+      "Bash(python -c \"from rocketpy import Rocket; print\\([m for m in dir\\(Rocket\\) if ''control'' in m.lower\\(\\)]\\)\")",
+      "Bash(python -c \"from rocketpy.control import _Controller; import inspect; print\\(inspect.getsource\\(_Controller.__init__\\)\\)\")",
+      "Bash(python -c \"from rocketpy.control import _Controller; import inspect; print\\(inspect.getsource\\(_Controller._Controller__init_controller_function\\)\\)\")",
+      "Bash(python -c \"from rocketpy import SolidMotor; import inspect; sig = inspect.signature\\(SolidMotor.__init__\\); print\\({k: v.default for k, v in sig.parameters.items\\(\\)}\\)\")"
+    ]
+  }
+}

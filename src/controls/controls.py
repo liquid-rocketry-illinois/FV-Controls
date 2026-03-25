@@ -109,8 +109,22 @@ class Controls(Dynamics):
     
     def add_control_surface_moments(self, M_controls_func: Callable):
         self.M_controls_func = M_controls_func
-    
-    
+
+
+    def cfd_roll_moment(self, velocity: float) -> float:
+        """CFD-derived roll moment as a function of freestream velocity magnitude.
+
+        Stub — replace with a lookup table interpolation once CFD data is available.
+
+        Args:
+            velocity (float): Freestream speed in m/s.
+
+        Returns:
+            float: Roll moment in N·m about the body roll axis.
+        """
+        return 0.0
+
+
     ## Additional implementation of control surface impact on forces on rocket (e.g. drag) possible
 
 

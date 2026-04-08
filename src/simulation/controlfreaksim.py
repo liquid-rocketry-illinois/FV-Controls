@@ -105,6 +105,11 @@ def run_rocketpy_sensor_test():
         #send "clean" data to imu
         y_noisy = my_imu.read(t, rocket_state, derivatives)
 
+        #conversion from g to m/s2, accel reads in terms of g
+        #copy to not overwrite original data
+        y_ms = np.copy(y_noisy)
+        y_ms[0:3] = y_ms[0:3] * 9.81
+
         #for plot
         timestamps.append(t)
         
@@ -115,9 +120,7 @@ def run_rocketpy_sensor_test():
         true_sensor_z = a_body[2] - g_body[2] 
         
         true_z_accel_history.append(true_sensor_z)
-        noisy_z_accel_history.append(y_noisy[2]) # y[2] is accel z
-
-        
+        noisy_z_accel_history.append(y_ms[2]) # y[2] is accel z, use converted version
         
     print("Generating Plot...")
     plt.figure(figsize=(10, 5))
@@ -137,3 +140,5 @@ def run_rocketpy_sensor_test():
 
 if __name__ == "__main__":
     run_rocketpy_sensor_test()
+
+    #python -m simulation.controlfreaksim in src

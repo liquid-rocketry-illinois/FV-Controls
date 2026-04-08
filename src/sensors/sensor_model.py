@@ -166,7 +166,7 @@ class IMU(Sensor):
             derivatives (array): [w1dot, w2dot, w3dot, v1dot, v2dot, v3dot, qdot...]
         """
 
-        #check rate
+        #check ratec
         self.last_update_time = t
 
         #physics
@@ -190,7 +190,9 @@ class IMU(Sensor):
 
         #concat for sensor fusion, make sure order matches for C
 
-        return np.concatenate((a_dig, w_dig))
+        #accelerometer reads in terms of g
+        a_dig_real = a_dig / self.g
+        return np.concatenate((a_dig_real, w_dig))
 
 #from silsim.py sensor fusion step is: xdot -= self.controls.L @ (C @ xhat - y)
 #measurement vector needs to be concat

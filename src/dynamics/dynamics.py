@@ -1,11 +1,50 @@
 from sympy import *
 import numpy as np
 import pandas as pd
+from scipy.interpolate import interp1d
 from typing import Callable
 
 from dynamics.momentsforces import MomentsForces
-# from dynamics.thrust import Thrust
-# from dynamics.speedsmass import SpeedMass
+
+
+def build_power_state_drag_model(
+    power_on_csv: str,
+    power_off_csv: str,
+    burnout_time: float,
+):
+    """Build a drag callback that matches RocketPy's power-on/power-off CSV usage."""
+    power_on_drag_df = pd.read_csv(power_on_csv)
+    power_off_drag_df = pd.read_csv(power_off_csv)
+
+    power_on_drag_interp = interp1d(
+        power_on_drag_df.iloc[:, 0].to_numpy(dtype=float),
+        power_on_drag_df.iloc[:, 1].to_numpy(dtype=float),
+        kind="linear",
+        bounds_error=False,
+        fill_value=(
+            float(power_on_drag_df.iloc[0, 1]),
+            float(power_on_drag_df.iloc[-1, 1]),
+        ),
+    )
+
+    power_off_drag_interp = interp1d(
+        power_off_drag_df.iloc[:, 0].to_numpy(dtype=float),
+        power_off_drag_df.iloc[:, 1].to_numpy(dtype=float),
+        kind="linear",
+        bounds_error=False,
+        fill_value=(
+            float(power_off_drag_df.iloc[0, 1]),
+            float(power_off_drag_df.iloc[-1, 1]),
+        ),
+    )
+
+    def drag_func(mach: float, t: float) -> float:
+        if t < burnout_time:
+            return float(power_on_drag_interp(mach))
+        return float(power_off_drag_interp(mach))
+
+    return drag_func
+
 
 class Dynamics(MomentsForces):
     def __init__(self, rocket_name : str):
@@ -25,7 +64,6 @@ class Dynamics(MomentsForces):
         self.f_subs_full : Matrix = None
         self.dt : float = None
         self.x0 : np.ndarray = None
-        self.t0 : float = 0.0
         self.t_sym : Symbol = None
 
         ## Uninitialized parameters ##
@@ -33,7 +71,8 @@ class Dynamics(MomentsForces):
         # Rocket parameters
         self.I_0 : float = None # Initial moment of inertia in kg·m²
         self.I_f : float = None # Final moment of inertia in kg·m²
-        self.I_3 : float = None # Rotational moment of inertia about z-axis in kg·m²
+        self.I_3 : float = None # Rotational moment of inertia about z-axis at launch in kg·m²
+        self.I_3_f : float = None # Rotational moment of inertia about z-axis at burnout in kg·m²
         self.x_CG_0 : float = None # Initial center of gravity location in meters
         self.x_CG_f : float = None # Final center of gravity location in meters
 
@@ -44,19 +83,57 @@ class Dynamics(MomentsForces):
         self.d : float = None # Rocket body diameter in meters
         self.L_ne : float = None # Length from nose to nozzle in meters
         self.C_d : float = None # Drag coefficient
-        self.Cnalpha_rocket : float = None # Rocket normal force coefficient derivative
+        self.Cnalpha_rocket : float = None # Total rocket CN_alpha (sum of all components)
         self.t_motor_burnout : float = None # Time to motor burnout in seconds
         self.t_launch_rail_clearance : float = None # Time to launch rail clearance in seconds
         self.t_estimated_apogee : float = None # Time to apogee in esconds
-        self.CP_func : Callable[[Expr], Expr] = None # Center of pressure location as a function of angle of attack in degrees
-        
-        # Fin parameters
+        self._cp_2d_func = None   # CP as function of (AoA_deg, mach)
+
+        # Per-component Barrowman CN_alpha (set by Parameter.compute_cnalpha_barrowman)
+        self.CN_alpha_nose     : float = None  # Nose cone contribution (≈ 2.0 for full-diameter nose)
+        self.CN_alpha_canards  : float = None  # Canard fin set contribution
+        self.CN_alpha_fins     : float = None  # Main fin set contribution (all fins combined)
+        self.CN_alpha_tail     : float = None  # Boattail contribution (typically negative)
+        self.CP_nose           : float = None  # Nose CP from nose tip (m)
+        self.CP_canards        : float = None  # Canard fin set CP from nose tip (m)
+        self.CP_fins           : float = None  # Main fin set CP from nose tip (m)
+        self.CP_tail           : float = None  # Boattail CP from nose tip (m)
+
+        # Nose geometry (used by Barrowman computation in Parameter)
+        self.L_nose     : float = None  # Nose cone length (m)
+        self.R_nose     : float = None  # Nose cone base radius (m); None → uses d/2
+        self.nose_shape : str   = None  # Shape string: 'conical', 'ogive', 'von_karman', etc.
+
+        # Canard geometry
+        self.N_canards        : int   = None
+        self.Cr_canards       : float = None
+        self.Ct_canards       : float = None
+        self.s_canards        : float = None
+        self.x_canard_LE      : float = None  # Root LE axial position from nose tip (m)
+        self.R_body_at_canard : float = None  # Body radius at canard (m)
+        self.x_sweep_canards  : float = 0.0   # Canard LE sweep offset (m)
+        self.canard_plane_angle_deg : float = 0.0  # Canard-plane azimuth about body axis (deg)
+
+        # Main fin geometry (supplements setFinParams N/Cr/Ct/s/delta)
+        self.x_fin_LE      : float = None  # Root LE axial position from nose tip (m)
+        self.R_body_at_fin : float = None  # Body radius at fin (m); None → uses d/2
+        self.x_sweep_fin   : float = 0.0   # Main fin LE sweep offset (m)
+
+        # Tail / boattail geometry
+        self.tail_type       : str   = None
+        self.R_boattail_fore : float = None
+        self.R_boattail_aft  : float = None
+        self.L_boattail      : float = None
+        self.x_boattail      : float = None
+
+        # Fin parameters (main fin set — also used in roll moment EOM)
         self.N : float = None # Number of fins
         self.Cr : float = None # Root chord in meters
         self.Ct : float = None # Tip chord in meters
         self.s : float = None # Span in meters
         self.delta : float = None # Fin cant angle in degrees
-        self.Cnalpha_fin : float = None # Normal FORCE coefficient normalized by angle of attack for 1 fin
+        self.Cnalpha_fin : float = None # Per-fin CN_alpha used in roll EOM (1/rad, normalised to A_ref)
+    
 
         
         # Rocket name (used for saving simulation results from Simluation() object to designated path)
@@ -70,147 +147,19 @@ class Dynamics(MomentsForces):
         self._f_numeric = None  # Cached lambdified EOM
         self._A_numeric = None  # Cached lambdified Jacobian of f wrt state
 
+        self._drag_func = None # C_d as function of Mach number
+        self._cnalpha_rocket_func = None  # optional: Cnalpha_rocket as function of Mach
+        self._cnalpha_fin_func    = None  # optional: Cnalpha_fin as function of Mach
+
+        #environment - call from rocektpy
+        self._env_density_func     = None  # rho(altitude) from RocketPy env
+        self._env_gravity_func     = None  # g(altitude) from RocketPy env
+        self._env_wind_x_func      = None  # v_wind_x(altitude) from RocketPy env
+        self._env_wind_y_func      = None  # v_wind_y(altitude) from RocketPy env
+        self._env_temperature_func = None  # T(altitude) from RocketPy env, Kelvin
+
 
         self.rocket_name = rocket_name
-
-# Move to m-f
-    # def set_symbols(self):
-    #     """Set the symbolic variables for the dynamics equations.
-    #     """
-    #     w1, w2, w3, v1, v2 = symbols('w_1 w_2 w_3 v_1 v_2', real = True) # Angular and linear velocities
-    #     v3 = symbols('v_3', real = True, positive = True) # Longitudinal velocity, assumed positive during flight
-    #     qw, qx, qy, qz = symbols('q_w q_x q_y q_z', real = True) # Quaternion components
-    #     I1, I2, I3 = symbols('I_1 I_2 I_3', real = True, positive = True) # Moments of inertia
-    #     T1, T2, T3 = symbols('T_1 T_2 T_3', real = True, positive = True) # Thrusts
-    #     mass, rho, d, g, CG = symbols('m rho d g CG', real = True, positive = True) # Mass, air density, diameter, gravity, center of gravity
-    #     delta = symbols('delta', real = True) # Fin cant angle
-    #     C_d = symbols('C_d', real = True, positive = True) # Drag coefficient
-    #     Cnalpha_fin, Cnalpha_rocket = symbols('C_n_alpha_fin C_n_alpha_rocket', real = True, positive = True) # Fin and rocket normal force coefficient derivatives
-    #     Cr, Ct, s = symbols('Cr Ct s', real = True, positive = True) # Fin root chord, tip chord, span
-    #     N = symbols('N', real = True, positive = True) # Number of fins
-    #     t_sym = symbols('t', real = True, positive = True) # Time symbol for Heaviside function
-    #     v_wind1, v_wind2 = symbols('v_wind_1 v_wind_2', real = True) # Wind velocity components
-
-    #     self.state_vars = [w1, w2, w3, v1, v2, v3, qw, qx, qy, qz]
-    #     self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2]
-    #     # self.params = [I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N]
-    #     self.t_sym = t_sym # Time when rocket leaves the launch rail
-
-
-
-        
-
-    def setRocketParams(self, I_0: float, I_f: float, I_3: float,
-                        x_CG_0: float, x_CG_f: float,
-                        m_0: float, m_f: float, m_p: float,
-                        d: float, L_ne: float, C_d: float, Cnalpha_rocket: float,
-                        t_launch_rail_clearance: float, t_motor_burnout: float, t_estimated_apogee: float,
-                        CP_func: Callable[[Expr], Expr]):
-        """Set the rocket parameters.
-
-        Args:
-            I_0 (float): Initial moment of inertia in kg·m².
-            I_f (float): Final moment of inertia in kg·m².
-            I_3 (float): Moment of inertia about the z-axis in kg·m².
-            x_CG_0 (float): Initial center of gravity location in meters.
-            x_CG_f (float): Final center of gravity location in meters.
-            m_0 (float): Initial mass in kg.
-            m_f (float): Final mass in kg.
-            m_p (float): Propellant mass in kg.
-            d (float): Rocket diameter in meters.
-            L_ne (float): Length from nose to engine exit in meters.
-            Cnalpha_rocket (float): Rocket normal force coefficient derivative.
-            t_motor_burnout (float): Time until motor burnout in seconds.
-            t_estimated_apogee (float, optional): Estimated time until apogee in seconds.
-            t_launch_rail_clearance (float): Time until launch rail clearance in seconds.
-            CP_func (Callable[[Expr], Expr]): User defined function of center of pressure location as a function of angle of attack (deg).\
-                Takes Expr 'AoA_deg' as parameter. Returns function fit equation of center of pressure location vs AoA (e.g. using Google Sheets).
-        """
-        self.I_0 = I_0
-        self.I_f = I_f
-        self.I_3 = I_3
-        self.x_CG_0 = x_CG_0
-        self.x_CG_f = x_CG_f
-        self.m_0 = m_0
-        self.m_f = m_f
-        self.m_p = m_p
-        self.d = d
-        self.L_ne = L_ne
-        self.C_d = C_d
-        self.Cnalpha_rocket = Cnalpha_rocket
-        self.t_launch_rail_clearance = t_launch_rail_clearance
-        self.t_motor_burnout = t_motor_burnout
-        self.t_estimated_apogee = t_estimated_apogee
-        self.CP_func = CP_func
-
-
-    def setFinParams(self, N: int, Cr: float, Ct: float, s: float, Cnalpha_fin: float, delta: float):
-        """Set the fin parameters.
-
-        Args:
-            N (int): Number of fins.
-            Cr (float): Fin root chord in meters.
-            Ct (float): Fin tip chord in meters.
-            s (float): Fin span in meters.
-            Cnalpha_fin (float): Fin normal force coefficient derivative.
-            delta (float): Fin cant angle in degrees.
-        """
-        self.N = N
-        self.Cr = Cr
-        self.Ct = Ct
-        self.s = s
-        self.Cnalpha_fin = Cnalpha_fin
-        self.delta = delta
-
-    
-    
-    def setEnvParams(self, v_wind: list, rho: float, g: float):
-        """Set the environmental parameters.
-
-        Args:
-            v_wind (list): Wind velocity vector [x, y] in m/s.
-            rho (float): Air density in kg/m^3.
-            g (float): Gravitational acceleration in m/s^2.
-        """
-        self.v_wind = v_wind
-        self.rho = rho
-        self.g = g
-        
-        
-    def setSimParams(self, dt: float, x0: np.ndarray):
-        """Set the simulation parameters. Appends initial state to states list and initial time to ts list.
-
-        Args:
-            dt (float): Time step for simulation in seconds.
-            x0 (np.ndarray): Initial state vector.
-        """
-        self.dt = dt
-        self.x0 = np.array(x0, dtype=float)
-        
-        
-    def checkParamsSet(self):
-        """Check if all necessary parameters have been set.
-
-        Raises:
-            ValueError: If any parameter is not set.
-        """
-        required_params = [
-            'I_0', 'I_f', 'I_3',
-            'x_CG_0', 'x_CG_f',
-            'm_0', 'm_f', 'm_p',
-            'd', 'L_ne',
-            't_launch_rail_clearance', 't_motor_burnout', 't_estimated_apogee',
-            'thrust_times', 'thrust_forces',
-            'v_wind', 'rho', 'g',
-            'N', 'Cr', 'Ct', 's', 'Cnalpha_fin',
-            'CP_func'
-        ]
-        for param in required_params:
-            if not hasattr(self, param):
-                raise ValueError(f"Parameter '{param}' is not set. Please set all necessary parameters before proceeding.")
-    
-    
-
 
     def get_inertia(self, t: float) -> list:
         """Get the moment of inertia of the rocket at time t.
@@ -221,10 +170,28 @@ class Dynamics(MomentsForces):
         Returns:
             float: The moment of inertia of the rocket at time t in kg·m².
         """
-        I_long = self.I_0 - (self.I_0 - self.I_f) / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.I_f
-        I = [I_long, I_long, self.I_3]
+        if t <= self.t_motor_burnout:
+            I_long = self.I_0 - (self.I_0 - self.I_f) / self.t_motor_burnout * t
+            I_roll = self.I_3 - (self.I_3 - self.I_3_f) / self.t_motor_burnout * t
+        else:
+            I_long = self.I_f
+            I_roll = self.I_3_f
+        I = [I_long, I_long, I_roll]
 
         return I
+
+    def get_inertia_dot(self, t: float) -> list:
+        """Get the time derivative of the rocket inertia components at time t.
+
+        During motor burn, pitch/yaw and roll inertia are modeled as changing linearly.
+        """
+        if t <= self.t_motor_burnout:
+            I_long_dot = - (self.I_0 - self.I_f) / self.t_motor_burnout
+            I_roll_dot = - (self.I_3 - self.I_3_f) / self.t_motor_burnout
+        else:
+            I_long_dot = 0.0
+            I_roll_dot = 0.0
+        return [I_long_dot, I_long_dot, I_roll_dot]
 
     
     def get_CG(self, t: float) -> float:
@@ -423,7 +390,7 @@ class Dynamics(MomentsForces):
         if self.t_sym is None or self.state_vars is None or self.params is None:
             self.set_symbols()
         w1, w2, w3, v1, v2, v3, qw, qx, qy, qz = self.state_vars
-        I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N, v_wind1, v_wind2 = self.params
+        I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N_fins, v_wind1, v_wind2, CP = self.params
         # I1, I2, I3, T1, T2, T3, mass, rho, d, g, CG, delta, C_d, Cnalpha_fin, Cnalpha_rocket, Cr, Ct, s, N = self.params
         
         v = Matrix([v1, v2, v3]) # Velocity vector
@@ -447,9 +414,21 @@ class Dynamics(MomentsForces):
         M1, M2, M3 = M[0], M[1], M[2]
         
         ## Equations of motion ##
-        w1dot = ((I2 - I3) * w2 * w3 + M1) / I1
-        w2dot = ((I3 - I1) * w3 * w1 + M2) / I2
-        w3dot = ((I1 - I2) * w1 * w2 + M3) / I3
+        I1dot = Piecewise(
+            (Float(-(self.I_0 - self.I_f) / self.t_motor_burnout), self.t_sym <= Float(self.t_motor_burnout)),
+            (Float(0.0), True),
+        )
+        I2dot = I1dot
+        I3dot = Piecewise(
+            (Float(-(self.I_3 - self.I_3_f) / self.t_motor_burnout), self.t_sym <= Float(self.t_motor_burnout)),
+            (Float(0.0), True),
+        )
+
+        # Euler rigid-body equations with time-varying principal inertias:
+        # I * wdot + I_dot * w + w x (I w) = M
+        w1dot = ((I2 - I3) * w2 * w3 + M1 - I1dot * w1) / I1
+        w2dot = ((I3 - I1) * w3 * w1 + M2 - I2dot * w2) / I2
+        w3dot = ((I1 - I2) * w1 * w2 + M3 - I3dot * w3) / I3
         vdot = F/mass - S * v
         qdot = (Omega * q_vec) * Float(1/2)
 
@@ -470,118 +449,219 @@ class Dynamics(MomentsForces):
 
 
 
-    
+    def set_f(self, t: float, xhat: np.ndarray):
+        """Substitute a numeric state and time into the symbolic EOM.
+        Stores the result in self.f_subs_full. Called by Controls.set_f().
 
-    def _gather_param_values(self, t: float) -> list:
-        """Collect numeric parameter values (same order as self.params) for lambdified EOM."""
-        thrust = self.get_thrust(t)
+        Args:
+            t (float): Current time in seconds.
+            xhat (np.ndarray): Current state vector [w1,w2,w3,v1,v2,v3,qw,qx,qy,qz].
+        """
+        if self.f is None:
+            self.define_eom()
+
+        state_subs = {sym: float(val) for sym, val in zip(self.state_vars, xhat)}
+
+        param_vals = self._gather_param_values(t, xhat)
+        param_subs = {sym: float(val) for sym, val in zip(self.params, param_vals)
+                      if sym is not None}
+
+        time_subs = {self.t_sym: float(t)}
+
+        self.f_subs_full = self.f.subs({**state_subs, **param_subs, **time_subs})
+
+
+    @staticmethod
+    def _compute_body_airspeed(x: np.ndarray, v_wind_x: float, v_wind_y: float) -> np.ndarray:
+        """Return air-relative velocity [va1, va2, va3] in the body frame.
+
+        Rotates the horizontal wind vector (world frame) into the body frame using
+        the quaternion from state x, then subtracts from body-frame inertial velocity.
+
+        Args:
+            x: state vector [w1,w2,w3,v1,v2,v3,qw,qx,qy,qz]
+            v_wind_x: world-frame wind x-component (m/s)
+            v_wind_y: world-frame wind y-component (m/s)
+
+        Returns:
+            np.ndarray shape (3,): [va1, va2, va3]
+        """
+        qw_n = float(x[6]); qx_n = float(x[7])
+        qy_n = float(x[8]); qz_n = float(x[9])
+        q_norm = np.sqrt(qw_n**2 + qx_n**2 + qy_n**2 + qz_n**2)
+        if q_norm > 1e-9:
+            qw_n /= q_norm; qx_n /= q_norm
+            qy_n /= q_norm; qz_n /= q_norm
+        xx, yy, zz = qx_n*qx_n, qy_n*qy_n, qz_n*qz_n
+        wx, wy, wz = qw_n*qx_n, qw_n*qy_n, qw_n*qz_n
+        xy, xz, yz = qx_n*qy_n, qx_n*qz_n, qy_n*qz_n
+        R_BW = np.array([
+            [1-2*(yy+zz), 2*(xy+wz),  2*(xz-wy)],
+            [2*(xy-wz),   1-2*(xx+zz), 2*(yz+wx)],
+            [2*(xz+wy),   2*(yz-wx),  1-2*(xx+yy)]
+        ])
+        v_wind_body = R_BW @ np.array([v_wind_x, v_wind_y, 0.0])
+        return np.array([
+            float(x[3]) - v_wind_body[0],
+            float(x[4]) - v_wind_body[1],
+            float(x[5]) - v_wind_body[2],
+        ])
+
+    def _gather_param_values(self, t: float, x: np.ndarray = None,
+                          altitude: float = None) -> list:
+        thrust      = self.get_thrust(t)
         mass_rocket = self.get_mass(t)
-        inertia = self.get_inertia(t)
-        x_CG = self.get_CG(t)
+        inertia     = self.get_inertia(t)
+        x_CG        = self.get_CG(t)
+
+        # Atmospheric values — use RocketPy env if available
+        if self._env_density_func is not None and altitude is not None:
+            rho_val        = float(self._env_density_func(altitude))
+            g_val          = float(self._env_gravity_func(altitude))
+            v_wind_x       = float(self._env_wind_x_func(altitude))
+            v_wind_y       = float(self._env_wind_y_func(altitude))
+            # Use altitude-dependent temperature for speed of sound
+            if self._env_temperature_func is not None:
+                T = float(self._env_temperature_func(altitude))  # Kelvin
+                speed_of_sound = float(np.sqrt(1.4 * 287.05 * T))
+            else:
+                speed_of_sound = 343.0
+        else:
+            rho_val        = float(self.rho)
+            g_val          = float(self.g)
+            v_wind_x       = float(self.v_wind[0])
+            v_wind_y       = float(self.v_wind[1])
+            speed_of_sound = 343.0
+
+        # Air-relative velocity in body frame — used for all aero lookups
+        if x is not None:
+            va = self._compute_body_airspeed(x, v_wind_x, v_wind_y)
+            v_air_mag = float(np.linalg.norm(va))
+            AoA_num   = float(np.degrees(
+                np.arctan2(np.sqrt(va[0]**2 + va[1]**2), va[2] + 1e-9)
+            ))
+            AoA_num = np.clip(AoA_num, -15.0, 15.0)  # match Piecewise bound in set_moments
+        else:
+            v_air_mag = 0.0
+            AoA_num   = 0.0
+
+        mach = v_air_mag / speed_of_sound
+
+        # Drag coefficient
+        if self._drag_func is not None and x is not None:
+            try:
+                C_d_val = float(self._drag_func(mach, t))
+            except TypeError:
+                C_d_val = float(self._drag_func(mach))
+        elif self.C_d is not None:
+            C_d_val = float(self.C_d)
+        else:
+            raise RuntimeError(
+                "No drag model set. Call controls.set_drag_func() or provide C_d in setRocketParams()."
+            )
+
+        # Cnalpha_fin
+        if self._cnalpha_fin_func is not None and x is not None:
+            Cnalpha_fin_val = float(self._cnalpha_fin_func(mach))
+        else:
+            Cnalpha_fin_val = float(self.Cnalpha_fin)
+
+        # Cnalpha_rocket
+        if self._cnalpha_rocket_func is not None and x is not None:
+            Cnalpha_rocket_val = float(self._cnalpha_rocket_func(mach))
+        else:
+            Cnalpha_rocket_val = float(self.Cnalpha_rocket)
+
+        # CP location — 2D (AoA + Mach) if func registered, else AoA-only fallback
+        if self._cp_2d_func is not None:
+            CP_val = float(self._cp_2d_func(AoA_num, mach))
+        elif self.CP_func is not None:
+            CP_val = float(self.CP_func(AoA_num))
+        else:
+            raise RuntimeError("No CP function set. Call controls.set_cp_func() before running.")
+
         return [
-            float(inertia[0]),  # I1
-            float(inertia[1]),  # I2
-            float(inertia[2]),  # I3
+            float(inertia[0]),      # I1
+            float(inertia[1]),      # I2
+            float(inertia[2]),      # I3
             float(thrust[0]),
             float(thrust[1]),
             float(thrust[2]),
             float(mass_rocket),
-            float(self.rho),
+            rho_val,                # altitude-dependent if env set
             float(self.d),
-            float(self.g),
+            g_val,                  # altitude-dependent if env set
             float(x_CG),
             float(np.deg2rad(self.delta)),
-            float(self.C_d),
-            float(self.Cnalpha_fin),
-            float(self.Cnalpha_rocket),
+            C_d_val,                # Mach-dependent if drag_func set
+            Cnalpha_fin_val,        # Mach-dependent if cnalpha_fin_func set
+            Cnalpha_rocket_val,     # Mach-dependent if cnalpha_rocket_func set
             float(self.Cr),
             float(self.Ct),
             float(self.s),
             float(self.N),
-            float(self.v_wind[0]),
-            float(self.v_wind[1]),
+            v_wind_x,               # altitude-dependent if env set
+            v_wind_y,               # altitude-dependent if env set
+            CP_val                  # AoA+Mach-dependent if cp_2d_func set
         ]
 
-
-    def _compile_numeric_funcs(self):
-        """Lazily lambdify EOM for fast numeric evaluation. Eigenvalues???"""
-        if self._f_numeric is not None:
-            return
-        if self.f is None or self.state_vars is None:
-            self.define_eom()
-
-        # Replace sqrt(v1^2 + v2^2) with guarded version to avoid NaNs.
-        w1, w2, w3, v1, v2, v3, qw, qx, qy, qz = self.state_vars
-        eps = Float(1e-9)
-        vxy = sqrt(v1**2 + v2**2 + eps**2)
-        repl = {
-            sqrt(v1**2 + v2**2): vxy,
-            (v1**2 + v2**2)**(Float(1)/2): vxy,
-        }
-
-        def _prep(expr: Matrix):
-            return expr.xreplace(repl)
-
-        arg_syms = self.state_vars + self.params + [self.t_sym]
-
-        self._f_numeric = lambdify(arg_syms, _prep(self.f), modules="numpy")
-
-
-    def _compile_A_funcs(self):
-        """Lazily lambdify Jacobian of the EOM with respect to state for fast A-matrix evaluation."""
-        if self._A_numeric is not None:
-            return
-        if self.f is None or self.state_vars is None:
-            self.define_eom()
-
-        w1, w2, w3, v1, v2, v3, qw, qx, qy, qz = self.state_vars
-        eps = Float(1e-9)
-        vxy = sqrt(v1**2 + v2**2 + eps**2)
-        repl = {
-            sqrt(v1**2 + v2**2): vxy,
-            (v1**2 + v2**2)**(Float(1)/2): vxy,
-        }
-
-        def _prep(expr: Matrix):
-            return expr.xreplace(repl)
-
-        m = Matrix(self.state_vars)
-        arg_syms = self.state_vars + self.params + [self.t_sym]
-
-        self._A_numeric = lambdify(arg_syms, _prep(self.f).jacobian(m), modules="numpy")
-
-
-    def f_numeric(self, t: float, x: np.ndarray, u: np.ndarray = None) -> np.ndarray:
-        """Fast numeric evaluation of EOM using cached lambdified functions. Control inputs are ignored."""
-        self.checkParamsSet()
-        self._compile_numeric_funcs()
-
-        state_vals = np.asarray(x, dtype=float).tolist()
-
-        param_vals = self._gather_param_values(t)
-        result = self._f_numeric(*(state_vals + param_vals + [float(t)]))
-        return np.array(result, dtype=float).reshape(-1)
+    def set_drag_func(self, drag_func: Callable):
+        """Register a velocity-dependent drag function to replace constant C_d.
         
-    
-    def getA(self, t: float, xhat: np.array) -> np.ndarray:
-        """Get the state matrix A evaluated at time t and state xhat.
+        Args:
+            drag_func (Callable): Function with signature (mach: float) -> float
+                                or (mach: float, t: float) -> float returning the
+                                drag coefficient at a given Mach number. The 2-arg
+                                version lets callers switch power-on/power-off drag
+                                based on time without changing the rest of the model.
+        """
+        self._drag_func = drag_func
+
+    def set_cp_func(self, cp_func):
+        """Register a 2D CP function for numeric propagation (Track 2).
+        Replaces the AoA-only CP_func at runtime with one that also
+        accounts for Mach number compressibility effects.
 
         Args:
-            t (float): The time in seconds.
-            xhat (np.array): The state estimation vector as a numpy array.
-        Returns:
-            np.ndarray: The state matrix A as a numpy array.
+            cp_func (Callable): Function with signature
+                                (AoA_deg: float, mach: float) -> float
+                                returning CP location in meters from nose.
         """
-        self.checkParamsSet()
-        self._compile_A_funcs()
+        self._cp_2d_func = cp_func
 
-        param_vals = self._gather_param_values(t)
-        args = np.asarray(xhat, dtype=float).tolist() + param_vals + [float(t)]
+    def set_cnalpha_rocket_func(self, func: Callable):
+        """Register a Mach-dependent Cnalpha function for the rocket body.
 
-        A_num = np.array(self._A_numeric(*args), dtype=np.float64)
-        self.A = A_num
+            Args:
+            func (Callable): Function with signature (mach: float) -> float
+                            returning Cnalpha_rocket at a given Mach number.
+        """
+        self._cnalpha_rocket_func = func
 
-        return A_num
+    def set_cnalpha_fin_func(self, func: Callable):
+        """Register a Mach-dependent Cnalpha function for the fins.
+
+        Args:
+            func (Callable): Function with signature (mach: float) -> float
+                            returning Cnalpha_fin at a given Mach number.
+        """
+        self._cnalpha_fin_func = func
+
+    def set_env_from_rocketpy(self, env):
+        """Register altitude-dependent atmospheric functions from a
+        RocketPy Environment object. Once set, rho, g, and v_wind are
+        computed from current altitude at every timestep instead of
+        using the constants from setEnvParams().
+
+        Args:
+            env: A RocketPy Environment object that has already been
+                configured with an atmospheric model.
+        """
+        self._env_density_func     = env.density            # callable: altitude (m) -> kg/m³
+        self._env_gravity_func     = env.gravity            # callable: altitude (m) -> m/s²
+        self._env_wind_x_func      = env.wind_velocity_x   # callable: altitude (m) -> m/s
+        self._env_wind_y_func      = env.wind_velocity_y   # callable: altitude (m) -> m/s
+        self._env_temperature_func = env.temperature        # callable: altitude (m) -> K
       
 # For testing
 def main():

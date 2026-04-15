@@ -51,10 +51,10 @@ class SensorFusion:
         #--correction step--
 
         #get Jacobian matrix that maps state to sensors
-        C = self.controls.get_C(self.xhat)
+        C = self.controls.get_C(t, self.xhat, u, A=A)
         
         #calc what we expect the imu to read right now
-        y_expected = C @ self.xhat
+        y_expected = self.controls.predict_sensor_measurement(t, self.xhat, u)
         
         #innovation: reality - expected
         residual = y_meas - y_expected
@@ -67,9 +67,10 @@ class SensorFusion:
 
         #update state using gain and residual
         self.xhat = self.xhat + (K @ residual)
-        
-        #update covariance
-        self.P = (self.I - K @ C) @ self.P
+
+        #update covariance — Joseph form guarantees symmetry and positive semi-definiteness
+        IKC = self.I - K @ C
+        self.P = IKC @ self.P @ IKC.T + K @ self.R @ K.T
         
         #quaternions drift over time with matrix math but nrom has to be 1
         quat = self.xhat[6:10]

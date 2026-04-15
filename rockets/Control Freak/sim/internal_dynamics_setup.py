@@ -1,5 +1,5 @@
 from dynamics import build_power_state_drag_model
-from parameter import Parameter
+from dynamics import Parameter
 
 # Shared motor / launch-reference inputs
 thrust_curve = "AeroTech_M2400T.eng"  # .eng thrust-curve file

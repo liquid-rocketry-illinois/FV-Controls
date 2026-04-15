@@ -2,8 +2,8 @@ import numpy as np
 from sympy import Matrix
 
 from controls import Controls
-from sensor_model import IMU, make_accel_gyro_sensor_model
-from sensor_fusion import SensorFusion
+from sensors.sensor_model import IMU, make_accel_gyro_sensor_model
+from sensors.sensor_fusion import SensorFusion
 
 
 # Controller limits / activation settings

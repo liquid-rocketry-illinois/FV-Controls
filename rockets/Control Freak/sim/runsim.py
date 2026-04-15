@@ -2,12 +2,17 @@ import sys
 import time
 from pathlib import Path
 
-repo_root = Path(__file__).resolve().parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+control_freak_root = Path(__file__).resolve().parent.parent
+project_root = control_freak_root.parents[1]
+src_root = project_root / "src"
+
+for path in (control_freak_root, src_root):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
-from flight_computer import Flight_Computer_Sim
+from controls.flight_computer import Flight_Computer_Sim
 from rocketpy_adapter import Adapter
 from sim.controls_setup import build_controls_stack
 from sim.internal_dynamics_setup import build_internal_dynamics

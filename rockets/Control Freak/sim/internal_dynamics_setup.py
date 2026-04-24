@@ -2,27 +2,27 @@ from dynamics import build_power_state_drag_model
 from dynamics import Parameter
 
 # Shared motor / launch-reference inputs
-thrust_curve = "AeroTech_M2400T.eng"  # .eng thrust-curve file
+thrust_curve = "../data/motor_file/AeroTech_M2400T.eng"  # .eng thrust-curve file from rocketpy.ipynb
 motor_burn_time = 3.28  # s
 rail_button_angular_position_deg = 45.0  # deg, about the fins axis
 
 
 
 rocket_params = {
-    "I_0": 11.31,  # kg*m^2, transverse inertia at ignition
-    "I_f": 9.18,  # kg*m^2, transverse inertia after burnout
-    "I_3": 0.065,  # kg*m^2, roll-axis inertia at ignition
-    "I_3_f": 0.06,  # kg*m^2, roll-axis inertia after burnout
-    "x_CG_0": 1.6095,  # m from nose tip, CG at ignition
-    "x_CG_f": 1.4795,  # m from nose tip, CG after burnout
-    "m_0": 22.777,  # kg, total mass at ignition
-    "m_f": 19.12454,  # kg, total mass after burnout
-    "m_p": 22.777 - 19.12454,  # kg, propellant mass
+    "I_0": 13.147498862800127,  # kg*m^2, transverse inertia at ignition from RocketPy
+    "I_f": 10.616251553628745,  # kg*m^2, transverse inertia after burnout from RocketPy
+    "I_3": 0.06288225431082371,  # kg*m^2, roll-axis inertia at ignition from RocketPy
+    "I_3_f": 0.05936000000111055,  # kg*m^2, roll-axis inertia after burnout from RocketPy
+    "x_CG_0": 1.8962789255921615,  # m from nose tip, CG at ignition from RocketPy
+    "x_CG_f": 1.7504164128075148,  # m from nose tip, CG after burnout from RocketPy
+    "m_0": 20.557700768112838,  # kg, total mass at ignition from RocketPy
+    "m_f": 16.9057,  # kg, total mass after burnout from RocketPy
+    "m_p": 3.6520007681128384,  # kg, propellant mass from motor grain geometry
     "d": 0.131,  # m, body outer diameter
-    "L_ne": 2.59,  # m, nose-to-nozzle reference length, rocekt length in most case
-    "t_launch_rail_clearance": 0.322,  # s, expected rail-clearance time
-    "t_motor_burnout": motor_burn_time,  # s, burnout time seen  
-    "t_estimated_apogee": 24.959,  # s, expected apogee time
+    "L_ne": 2.870,  # m, nose-to-nozzle reference length from rocketpy.ipynb motor placement
+    "t_launch_rail_clearance": 0.323,  # s, rail departure time from RocketPy
+    "t_motor_burnout": motor_burn_time,  # s, burnout time seen
+    "t_estimated_apogee": 24.301,  # s, apogee time from RocketPy
 }
 
 
@@ -31,7 +31,7 @@ fin_params = {
     "Cr": 0.305,  # m, fin root chord
     "Ct": 0.152,  # m, fin tip chord
     "s": 0.133,  # m, fin span
-    "delta": 0.2,  # deg, main-fin cant angle
+    "delta": 0.0,  # deg, main-fin cant angle from rocketpy.ipynb
 }
 
 
@@ -40,7 +40,7 @@ canard_params = {
     "Cr": 0.0508,  # m, canard root chord
     "Ct": 0.0127,  # m, canard tip chord
     "s": 0.0635,  # m, canard span
-    "x_le": 0.787,  # m from nose tip, canard root leading-edge position
+    "x_le": 1.04,  # m from nose tip, canard root leading-edge position from rocketpy.ipynb
     "sweep_angle": 0.001,  # deg, canard sweep angle
     "plane_angle_deg": 0 #rail_button_angular_position_deg + 90.0,  # deg, canard-plane azimuth; perpendicular to the rail-button axis
 }
@@ -48,20 +48,20 @@ canard_params = {
 
 aero_direct_params = {
     "nose_cn": 2.000,  # 1/rad, nose normal-force slope contribution
-    "nose_cp": 0.305,  # m from nose tip, nose CP location
+    "nose_cp": 0.362,  # m from nose tip, nose CP location from RocketPy
     "canard_cn": 0.855,  # 1/rad, canard normal-force slope contribution
-    "canard_cp": 0.796,  # m from nose tip, canard CP location
+    "canard_cp": 1.049,  # m from nose tip, canard CP location from RocketPy
     "fin_cn": 9.346,  # 1/rad, main-fin normal-force slope contribution
-    "fin_cp": 2.340,  # m from nose tip, main-fin CP location
+    "fin_cp": 2.622,  # m from nose tip, main-fin CP location from RocketPy
     "tail_cn": -0.787,  # 1/rad, tail normal-force slope contribution
-    "tail_cp": 2.551,  # m from nose tip, tail CP location
+    "tail_cp": 2.830,  # m from nose tip, tail CP location from RocketPy
 }
 
  ##fall back option when not using rocketpy environment
 env_params = {
     "v_wind": [0.0, 0.0],  # m/s, fallback horizontal wind [east, north] for non-RocketPy use
-    "rho": 1.225,  # kg/m^3, fallback air density
-    "g": 9.81,  # m/s^2, fallback gravitational acceleration
+    "rho": 1.213,  # kg/m^3, surface air density from RocketPy environment
+    "g": 9.8014,  # m/s^2, surface gravity from RocketPy environment
 }
 
 
@@ -73,8 +73,8 @@ sim_params = {
 
 
 drag_model_params = {
-    "power_on_csv": "CD_Power-on_copy.csv",  # CSV, drag-vs-Mach curve used while motor is burning, get from RAS Aero
-    "power_off_csv": "CD_Power-off_copy.csv",  # CSV, drag-vs-Mach curve used after burnout
+    "power_on_csv": "../data/drag/CD_Power-on.csv",  # CSV, drag-vs-Mach curve used while motor is burning
+    "power_off_csv": "../data/drag/CD_Power-off.csv",  # CSV, drag-vs-Mach curve used after burnout
     "burnout_time": motor_burn_time,  # s, switches the internal drag model from power-on to power-off
 }
 

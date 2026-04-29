@@ -56,8 +56,9 @@
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
-  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
   "python.analysis.extraPaths": [
     "./src/sensors"
-  ]
+  ],
+  "python-envs.defaultPackageManager": "ms-python.python:conda"
 }

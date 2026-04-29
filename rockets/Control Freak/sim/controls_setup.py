@@ -11,15 +11,15 @@ control_params = {
     "u0": np.array([0.0]),  # rad, initial canard deflection command
     "max_input": np.deg2rad(8),  # rad, actuator saturation limit
     "max_input_rate": np.deg2rad(545),  # rad/s, actuator maximum deflection slew rate
-    "roll_rate_gain": -1.0,  # rad/(rad/s), state-feedback gain on w3
+    "roll_damping_lambda": 2.0,  # 1/s, desired exponential roll-rate decay rate
+    "min_control_speed": 30.0,  # m/s, avoid huge scheduled gains at low dynamic pressure
     "mach_activation_on": False,  # bool, enables the post-burn Mach gate in the controller
     "mach_activation_threshold": 0.6,  # Mach, controller activates below this value after burnout
 }
 
 # Roll-control effectiveness model
 canard_model_params = {
-    "a_canard": -0.625484,  # N*m/rad, zero-speed roll-moment slope
-    "b_canard": 0.011041,  # N*m/(rad*(m/s)), speed-dependent roll-moment slope term
+    "moment_coeff_per_deg": -4.23e-7,  # N*m/(m^2/s^2*deg), zero-AoA symmetric CFD fit
 }
 
 # IMU model inputs
@@ -46,6 +46,8 @@ ekf_params = {
     ],
     "measurement_noise_std": {
         "accel_g": imu_params["accel_noise_density"] / imu_params["g"],  # g, match IMU output units
+        "accel_model_g": 0.5,  # g, EKF trust limit for accel model mismatch
+        "accel_burn_g": 5.0,  # g, downweight accel during motor burn vibration/thrust mismatch
         "gyro_rad_s": imu_params["gyro_noise_density"],  # rad/s, match IMU model noise
     },
 }
@@ -73,24 +75,38 @@ def build_controls_stack(parameter_bundle):
 
     controls.set_drag_func(drag_func)
 
-    a_canard = canard_model_params["a_canard"]
-    b_canard = canard_model_params["b_canard"]
+    moment_coeff_per_deg = canard_model_params["moment_coeff_per_deg"]
 
     def canard_moment_cfd(v_mag: float, zeta: float) -> float:
-        return (a_canard + b_canard * v_mag) * zeta
+        delta_deg = np.rad2deg(zeta)
+        return moment_coeff_per_deg * (v_mag ** 2) * delta_deg
 
     def canard_moment_jacobian(v_mag: float) -> float:
-        return a_canard + b_canard * v_mag
+        return moment_coeff_per_deg * (v_mag ** 2) * (180.0 / np.pi)
 
     controls.add_control_surface_moments(lambda sv, iv: Matrix([0, 0, 0]))
     controls.set_canard_cfd_func(canard_moment_cfd)
     controls.set_canard_jacobian_func(canard_moment_jacobian)
 
-    roll_rate_gain = control_params["roll_rate_gain"]
+    roll_damping_lambda = control_params["roll_damping_lambda"]
+    min_control_speed = control_params["min_control_speed"]
 
     def K_func(t: float, xhat: np.ndarray) -> np.ndarray:
         K = np.zeros((1, 10))
-        K[0, 2] = roll_rate_gain
+
+        v_air_mag = float(np.linalg.norm(xhat[3:6]))
+        if v_air_mag < min_control_speed:
+            return K
+
+        I3 = float(controls.get_inertia(t)[2])
+        dM_dzeta = canard_moment_jacobian(v_air_mag)
+        if abs(dM_dzeta) < 1e-9:
+            return K
+
+        # Desired roll damping: w3_dot_cmd = -lambda * w3.
+        # Since M = dM_dzeta*zeta and w3_dot = M/I3,
+        # zeta_cmd = (-I3*lambda/dM_dzeta) * w3.
+        K[0, 2] = -I3 * roll_damping_lambda / dM_dzeta
         return K
 
     controls.setK(K_func)
@@ -99,14 +115,21 @@ def build_controls_stack(parameter_bundle):
 
     imu = IMU(**imu_params)
 
+    sensor_model = make_accel_gyro_sensor_model(imu, controls)
+    sensor_model.accel_model_std_g = ekf_params["measurement_noise_std"]["accel_model_g"]
+    sensor_model.accel_burn_std_g = ekf_params["measurement_noise_std"]["accel_burn_g"]
+
     controls.set_sensor_params(
         sensor_vars=["a1", "a2", "a3", "w1", "w2", "w3"],
-        sensor_model=make_accel_gyro_sensor_model(imu, controls),
+        sensor_model=sensor_model,
     )
 
     P0 = np.eye(10) * ekf_params["initial_covariance_scale"]
     Q = np.diag(ekf_params["process_noise_diag"])
-    accel_std = ekf_params["measurement_noise_std"]["accel_g"]
+    accel_std = max(
+        ekf_params["measurement_noise_std"]["accel_g"],
+        ekf_params["measurement_noise_std"]["accel_model_g"],
+    )
     gyro_std = ekf_params["measurement_noise_std"]["gyro_rad_s"]
     accel_var = accel_std ** 2
     gyro_var = gyro_std ** 2

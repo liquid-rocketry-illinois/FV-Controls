@@ -232,11 +232,6 @@ def make_accel_gyro_sensor_model(imu: IMU, controls) -> callable:
         else:
             u = np.asarray(u, dtype=float)
 
-        xdot = controls.f_numeric(t, x, u)
-        omega = x[0:3]
-        velocity_body = x[3:6]
-        inertial_accel_body = xdot[3:6] + np.cross(omega, velocity_body)
-
         qw, qx, qy, qz = x[6:10]
         norm = np.sqrt(qw**2 + qx**2 + qy**2 + qz**2)
         if norm > 0:
@@ -258,7 +253,16 @@ def make_accel_gyro_sensor_model(imu: IMU, controls) -> callable:
             g_local = float(controls.g)
 
         g_body = R_BW @ np.array([0.0, 0.0, -g_local])
-        specific_force_body = inertial_accel_body - g_body
+        rail_clearance = getattr(controls, "t_launch_rail_clearance", None)
+        if rail_clearance is not None and float(t) < float(rail_clearance):
+            specific_force_body = -g_body
+        else:
+            xdot = controls.f_numeric(t, x, u)
+            omega = x[0:3]
+            velocity_body = x[3:6]
+            inertial_accel_body = xdot[3:6] + np.cross(omega, velocity_body)
+            specific_force_body = inertial_accel_body - g_body
+
         accel_g = specific_force_body / float(imu.g)
         gyro = np.asarray(x[0:3], dtype=float)
         return np.concatenate((accel_g, gyro))

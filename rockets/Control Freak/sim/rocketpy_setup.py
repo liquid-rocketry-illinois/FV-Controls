@@ -1,4 +1,4 @@
-envfrom datetime import datetime
+from datetime import datetime
 from pathlib import Path
 
 import rocketpy
@@ -31,7 +31,7 @@ upper_button_position = 1.727
 lower_button_position = 2.692
 
 
-def build_rocketpy_stack():
+def build_rocketpy_stack(main_fin_cant_angle=0):
     """Create RocketPy environment, rocket, and flight objects."""
     env = rocketpy.Environment(
         latitude=launch_lat,
@@ -64,7 +64,7 @@ def build_rocketpy_stack():
         tip_chord=0.152,
         span=0.133,
         position=2.459,
-        cant_angle=0,
+        cant_angle=main_fin_cant_angle,
         airfoil=None,
         sweep_length=0.234,
     )
@@ -133,7 +133,7 @@ def build_rocketpy_stack():
         rail_length=rail_length,
         inclination=inclination,
         heading=heading,
-        terminate_on_apogee=False,
+        terminate_on_apogee=True,
     )
 
     return {

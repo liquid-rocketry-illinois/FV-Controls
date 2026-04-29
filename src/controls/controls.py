@@ -314,6 +314,16 @@ class Controls(Dynamics):
 
         if measurement_type == "accel_gyro":
             xhat = np.asarray(xhat, dtype=float).reshape(-1)
+            if (
+                self.t_launch_rail_clearance is not None
+                and float(t) < float(self.t_launch_rail_clearance)
+            ) or self.is_motor_burning(t):
+                C_num = np.zeros((6, 10), dtype=np.float64)
+                C_num[3:6, 0:3] = np.eye(3)
+                self.C = C_num
+                self.C_sym = None
+                return C_num
+
             if A is None:
                 A, _ = self.get_AB(t, xhat, u)
 
@@ -360,6 +370,7 @@ class Controls(Dynamics):
 
             C_num = np.zeros((6, 10), dtype=np.float64)
             C_num[0:3, :] = (A[3:6, :] + jac_cross + jac_minus_g_body) / accel_scale
+            C_num[0:3, 0:3] = 0.0
             C_num[3:6, 0:3] = np.eye(3)
 
             self.C = C_num

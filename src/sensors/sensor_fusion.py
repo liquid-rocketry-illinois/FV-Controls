@@ -13,6 +13,79 @@ class SensorFusion:
         self.controls = controls_model 
         self.I = np.eye(len(initial_state)) 
 
+    def _on_launch_rail(self, t: float) -> bool:
+        rail_clearance = getattr(self.controls, "t_launch_rail_clearance", None)
+        return rail_clearance is not None and float(t) < float(rail_clearance)
+
+    def _measurement_covariance(self, t: float) -> np.ndarray:
+        R = self.R.copy()
+        measurement_type = getattr(self.controls.sensor_model, "measurement_type", None)
+        if measurement_type == "accel_gyro" and self.controls.is_motor_burning(t):
+            burn_std = getattr(self.controls.sensor_model, "accel_burn_std_g", None)
+            if burn_std is not None:
+                R[0:3, 0:3] = np.eye(3) * float(burn_std) ** 2
+        return R
+
+    def _limit_measurement_gain(self, t: float, K: np.ndarray) -> np.ndarray:
+        """Keep each sensor channel correcting only states it directly observes."""
+        measurement_type = getattr(self.controls.sensor_model, "measurement_type", None)
+        if measurement_type == "accel_gyro":
+            K = K.copy()
+            accel_cols = slice(0, 3)
+            gyro_cols = slice(3, 6)
+
+            # Accel observes specific force, so do not let it directly jump rates or attitude.
+            K[0:3, accel_cols] = 0.0
+            K[6:10, accel_cols] = 0.0
+
+            # Gyro observes angular rate, not velocity or attitude.
+            K[3:10, gyro_cols] = 0.0
+
+            if self.controls.is_motor_burning(t):
+                K[:, accel_cols] = 0.0
+        return K
+
+    def _apply_rail_constraint(self):
+        """Keep the EKF state consistent with the rail constraint before launch."""
+        self.xhat[0] = 0.0
+        self.xhat[1] = 0.0
+        self.xhat[3] = 0.0
+        self.xhat[4] = 0.0
+        self.xhat[5] = max(0.0, float(self.xhat[5]))
+
+        q0 = np.asarray(self.controls.x0[6:10], dtype=float).copy()
+        norm = np.linalg.norm(q0)
+        if norm > 0:
+            q0 /= norm
+        self.xhat[6:10] = q0
+
+    def _update_on_rail(self, t, dt, y_meas, u):
+        """Before rail clearance, only gyro channels are observable/useful."""
+        xdot_pred = self.controls.f_numeric(t, self.xhat, u)
+        self.xhat = self.xhat + (xdot_pred * dt)
+        self._apply_rail_constraint()
+
+        A, _ = self.controls.get_AB(t, self.xhat, u)
+        F = self.I + (A * dt)
+        self.P = (F @ self.P @ F.T) + self.Q
+
+        C = np.zeros((6, len(self.xhat)), dtype=float)
+        C[3:6, 0:3] = np.eye(3)
+        y_expected = self.controls.predict_sensor_measurement(t, self.xhat, None)
+        residual = y_meas - y_expected
+
+        R = self._measurement_covariance(t)
+        S = (C @ self.P @ C.T) + R
+        K = self.P @ C.T @ np.linalg.inv(S)
+
+        self.xhat = self.xhat + (K @ residual)
+
+        IKC = self.I - K @ C
+        self.P = IKC @ self.P @ IKC.T + K @ R @ K.T
+
+        self._apply_rail_constraint()
+        return self.xhat
+
     def update(self, t, dt, y_meas, u):
         """fusion loop, runs every time step
             t: Current time
@@ -21,6 +94,9 @@ class SensorFusion:
             u (array): current control inputs (fin angles)
             
             returns xhat: filtered state estimate"""
+
+        if self._on_launch_rail(t):
+            return self._update_on_rail(t, dt, y_meas, u)
         
         #prediction step
 
@@ -60,17 +136,19 @@ class SensorFusion:
         residual = y_meas - y_expected
 
         #innovation covariance
-        S = (C @ self.P @ C.T) + self.R
+        R = self._measurement_covariance(t)
+        S = (C @ self.P @ C.T) + R
         
         #optimal kalman gain
         K = self.P @ C.T @ np.linalg.inv(S)
+        K = self._limit_measurement_gain(t, K)
 
         #update state using gain and residual
         self.xhat = self.xhat + (K @ residual)
 
         #update covariance — Joseph form guarantees symmetry and positive semi-definiteness
         IKC = self.I - K @ C
-        self.P = IKC @ self.P @ IKC.T + K @ self.R @ K.T
+        self.P = IKC @ self.P @ IKC.T + K @ R @ K.T
         
         #quaternions drift over time with matrix math but nrom has to be 1
         quat = self.xhat[6:10]

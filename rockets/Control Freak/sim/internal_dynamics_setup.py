@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from dynamics import build_power_state_drag_model
 from dynamics import Parameter
 
+SIM_DIR = Path(__file__).resolve().parent
+DATA_DIR = SIM_DIR.parent / "data"
+
 # Shared motor / launch-reference inputs
-thrust_curve = "../data/motor_file/AeroTech_M2400T.eng"  # .eng thrust-curve file from rocketpy.ipynb
+thrust_curve = DATA_DIR / "motor_file" / "AeroTech_M2400T.eng"  # .eng thrust-curve file from rocketpy.ipynb
 motor_burn_time = 3.28  # s
 rail_button_angular_position_deg = 45.0  # deg, about the fins axis
 
@@ -31,7 +36,7 @@ fin_params = {
     "Cr": 0.305,  # m, fin root chord
     "Ct": 0.152,  # m, fin tip chord
     "s": 0.133,  # m, fin span
-    "delta": 0.0,  # deg, main-fin cant angle from rocketpy.ipynb
+    "delta": 0.5,  # deg, main-fin cant angle from rocketpy.ipynb
 }
 
 
@@ -73,8 +78,8 @@ sim_params = {
 
 
 drag_model_params = {
-    "power_on_csv": "../data/drag/CD_Power-on.csv",  # CSV, drag-vs-Mach curve used while motor is burning
-    "power_off_csv": "../data/drag/CD_Power-off.csv",  # CSV, drag-vs-Mach curve used after burnout
+    "power_on_csv": DATA_DIR / "drag" / "CD_Power-on.csv",  # CSV, drag-vs-Mach curve used while motor is burning
+    "power_off_csv": DATA_DIR / "drag" / "CD_Power-off.csv",  # CSV, drag-vs-Mach curve used after burnout
     "burnout_time": motor_burn_time,  # s, switches the internal drag model from power-on to power-off
 }
 
@@ -89,7 +94,7 @@ def build_internal_dynamics():
     p.setSimParamsFromRailAngle(**sim_params)
     p.canard_plane_angle_deg = canard_params["plane_angle_deg"]
 
-    p.setThrustCurveFromFile(thrust_curve)
+    p.setThrustCurveFromFile(str(thrust_curve))
     p.checkParamsSet()
 
     drag_func = build_power_state_drag_model(**drag_model_params)

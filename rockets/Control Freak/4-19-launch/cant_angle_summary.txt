@@ -1,0 +1,15 @@
+Control Freak 4/19 ascent reconstruction
+
+Coordinate convention: x up, y west, z north
+Assumed north fraction of horizontal travel: 0.250
+Roll gyro bias removed: -56.760 deg/s
+Roll fit window: 0 to 8.00 s
+
+Internal dynamics cant estimate for fin_params['delta']: -0.1139 deg
+RocketPy cant sweep best fit: -0.1139 deg
+
+Log apogee: x=3489.1 m at t=25.42 s
+Log apogee horizontal: y=719.2 m west, z=185.7 m north
+RocketPy apogee: x=3271.5 m at t=24.46 s
+
+Note: measured y/z are reconstructed from speed and tilt because ascent GPS was invalid.

@@ -9,17 +9,18 @@ from sensors.sensor_fusion import SensorFusion
 # Controller limits / activation settings
 control_params = {
     "u0": np.array([0.0]),  # rad, initial canard deflection command
-    "max_input": np.deg2rad(8),  # rad, actuator saturation limit
-    "max_input_rate": np.deg2rad(545),  # rad/s, actuator maximum deflection slew rate
-    "roll_damping_lambda": 2.0,  # 1/s, desired exponential roll-rate decay rate
+    "max_input": np.deg2rad(9),  # rad, actuator saturation limit
+    "max_input_rate": np.deg2rad(428.571428571),  # rad/s, actuator maximum deflection slew rate
+    "roll_damping_lambda": 30,  # 1/s, desired exponential roll-rate decay rate
     "min_control_speed": 30.0,  # m/s, avoid huge scheduled gains at low dynamic pressure
+    "irec_compliant": True,  # bool, forces zero control during motor burn when enabled
     "mach_activation_on": False,  # bool, enables the post-burn Mach gate in the controller
     "mach_activation_threshold": 0.6,  # Mach, controller activates below this value after burnout
 }
 
 # Roll-control effectiveness model
 canard_model_params = {
-    "moment_coeff_per_deg": -4.23e-7,  # N*m/(m^2/s^2*deg), zero-AoA symmetric CFD fit
+    "moment_coeff_per_deg": -2.23e-6, #-4.23e-7,  # N*m/(m^2/s^2*deg), zero-AoA symmetric CFD fit
 }
 
 # IMU model inputs
@@ -59,7 +60,10 @@ def build_controls_stack(parameter_bundle):
     motor_burn_time = parameter_bundle["motor_burn_time"]
     drag_func = parameter_bundle["drag_func"]
 
-    controls = Controls(IREC_COMPLIANT=True, rocket_name="my_rocket")
+    controls = Controls(
+        IREC_COMPLIANT=control_params["irec_compliant"],
+        rocket_name="my_rocket",
+    )
     controls.load_params(p)
     controls.set_controls_params(
         u0=control_params["u0"],
@@ -105,8 +109,8 @@ def build_controls_stack(parameter_bundle):
 
         # Desired roll damping: w3_dot_cmd = -lambda * w3.
         # Since M = dM_dzeta*zeta and w3_dot = M/I3,
-        # zeta_cmd = (-I3*lambda/dM_dzeta) * w3.
-        K[0, 2] = -I3 * roll_damping_lambda / dM_dzeta
+        # u = -K*(xhat-r), so K = I3*lambda/dM_dzeta.
+        K[0, 2] = I3 * roll_damping_lambda / dM_dzeta
         return K
 
     controls.setK(K_func)

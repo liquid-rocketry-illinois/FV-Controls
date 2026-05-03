@@ -507,6 +507,71 @@ class Dynamics(MomentsForces):
             float(x[5]) - v_wind_body[2],
         ])
 
+    def fin_roll_moment_numeric(self, t: float, x: np.ndarray,
+                                altitude: float = None) -> float:
+        """Return the main-fin roll moment used by the dynamics EOM.
+
+        This mirrors the roll part of MomentsForces.set_moments():
+        M3_fin = H_rail * (M_f_roll - M_d_roll * w3), where M_f_roll is
+        the fin-cant forcing moment and M_d_roll is the fin roll damping
+        coefficient.
+        """
+        if t < self.t_launch_rail_clearance:
+            return 0.0
+
+        param_vals = self._gather_param_values(t, x, altitude)
+        (
+            _I1, _I2, _I3,
+            _T1, _T2, _T3,
+            _mass, rho, d, _g, _CG,
+            delta, _C_d, Cnalpha_fin, _Cnalpha_rocket,
+            Cr, Ct, s, N_fins,
+            v_wind_x, v_wind_y,
+            _CP,
+        ) = param_vals
+
+        va = self._compute_body_airspeed(x, v_wind_x, v_wind_y)
+        v_air_mag = float(np.sqrt(np.dot(va, va) + 1e-18))
+        w3 = float(x[2])
+
+        gamma = Ct / Cr
+        r_t = d / 2.0
+        tau = (s + r_t) / r_t
+        area = np.pi * (d / 2.0) ** 2
+
+        y_ma = (s / 3.0) * (1.0 + 2.0 * gamma) / (1.0 + gamma)
+        asin_arg = (tau**2 - 1.0) / (tau**2 + 1.0)
+        asin_term = np.arcsin(asin_arg)
+        K_f = (1.0 / np.pi**2) * (
+            (np.pi**2 / 4.0) * ((tau + 1.0) ** 2 / tau**2)
+            + (np.pi * (tau**2 + 1.0) ** 2 / (tau**2 * (tau - 1.0) ** 2)) * asin_term
+            - (2.0 * np.pi * (tau + 1.0)) / (tau * (tau - 1.0))
+            + ((tau**2 + 1.0) ** 2 / (tau**2 * (tau - 1.0) ** 2)) * asin_term**2
+            - (4.0 * (tau + 1.0) / (tau * (tau - 1.0))) * asin_term
+            + (8.0 / (tau - 1.0) ** 2) * np.log((tau**2 + 1.0) / (2.0 * tau))
+        )
+        M_f_roll = K_f * (0.5 * rho * v_air_mag**2) * (
+            N_fins * (y_ma + r_t) * Cnalpha_fin * delta * area
+        )
+
+        trap_integral = s / 12.0 * (
+            (Cr + 3.0 * Ct) * s**2
+            + 4.0 * (Cr + 2.0 * Ct) * s * r_t
+            + 6.0 * (Cr + Ct) * r_t**2
+        )
+        C_ldw = 2.0 * N_fins * Cnalpha_fin / (area * d**2) * np.cos(delta) * trap_integral
+        K_d = 1.0 + (
+            (tau - gamma) / tau - (1.0 - gamma) / (tau - 1.0) * np.log(tau)
+        ) / (
+            (tau + 1.0) * (tau - gamma) / 2.0
+            - (1.0 - gamma) * (tau**3 - 1.0) / (3.0 * (tau - 1.0))
+        )
+        M_d_roll = K_d * (0.5 * rho * v_air_mag**2) * area * d * C_ldw * (
+            d / (2.0 * v_air_mag)
+        )
+
+        return float(M_f_roll - M_d_roll * w3)
+
     def _gather_param_values(self, t: float, x: np.ndarray = None,
                           altitude: float = None) -> list:
         thrust      = self.get_thrust(t)

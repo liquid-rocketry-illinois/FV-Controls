@@ -16,6 +16,7 @@ for path in (control_freak_root, src_root):
 
 from controls.flight_computer import Flight_Computer_Sim
 from rocketpy_adapter import Adapter
+from simulation.monte_carlo import MonteCarloConfig, run_monte_carlo
 from sim.controls_setup import build_controls_stack
 from sim.internal_dynamics_setup import build_internal_dynamics
 from sim.rocketpy_setup import build_rocketpy_stack
@@ -83,7 +84,15 @@ def benchmark_flight_step(sim, results, env, sample_count=250, warmup_count=20):
 #   'rocketpy_closedloop'  — RocketPy truth with controller feedback injected into RocketPy.
 #   'ekf_only'             — Internal dynamics only, EKF only, no control.
 #   'ekf_controlled'       — Internal dynamics only, EKF + control.
+#   'monte_carlo'          — Batch robustness verification after the nominal setup is tuned.
 simulation_mode = "ekf_controlled"
+
+monte_carlo_config = MonteCarloConfig(
+    base_mode="ekf_controlled",
+    num_trials=50,
+    seed=4242,
+    output_dir=project_root / "results" / "monte_carlo",
+)
 
 
 
@@ -108,6 +117,15 @@ canards = rocketpy_bundle["canards"]
 # SECTION 3 — RUN SIMULATION
 # ================================================================
 controls.set_env_from_rocketpy(env)
+
+if simulation_mode == "monte_carlo":
+    run_monte_carlo(
+        config=monte_carlo_config,
+        env=env,
+        build_internal_dynamics=build_internal_dynamics,
+        build_controls_stack=build_controls_stack,
+    )
+    sys.exit(0)
 
 sim = Flight_Computer_Sim(controls, imu, ekf)
 rocketpy_adapter = Adapter(sim, simulation_type=simulation_mode)

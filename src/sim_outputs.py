@@ -379,7 +379,7 @@ def save_and_plot_results(
 
     t_burnout = controls.t_motor_burnout
 
-    fig_diag, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
+    fig_diag, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
 
     axes[0].plot(t, speed_true, label="truth |v|")
     axes[0].plot(t, speed_hat,  label="EKF |v|", linestyle="--")
@@ -475,12 +475,16 @@ def save_and_plot_results(
     fig5.savefig(output_path / "kalman_filter.png", dpi=150)
     plt.close(fig5)
 
+    u_applied = results.get("u_applied", results["u"])
     canard_deg = np.rad2deg(results["u"][:, 0])
+    canard_applied_deg = np.rad2deg(u_applied[:, 0])
     canard_rate = np.gradient(canard_deg, t)
     max_deg = np.rad2deg(controls.max_input)
 
     fig6, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
-    axes[0].plot(t, canard_deg)
+    axes[0].plot(t, canard_deg, label="controller command")
+    if not np.allclose(canard_applied_deg, canard_deg):
+        axes[0].plot(t, canard_applied_deg, linestyle=":", label="applied to dynamics")
     axes[0].axhline(max_deg, color="r", linestyle="--", linewidth=0.8, label=f"+{max_deg:.1f} deg limit")
     axes[0].axhline(-max_deg, color="r", linestyle="--", linewidth=0.8, label=f"-{max_deg:.1f} deg limit")
     axes[0].axhline(0, color="k", linewidth=0.4)
@@ -494,7 +498,7 @@ def save_and_plot_results(
     axes[1].grid(True)
 
     axes[2].plot(t, np.rad2deg(results["roll_true"]), label="Roll rate (deg/s)")
-    axes[2].plot(t, canard_deg, linestyle="--", label="Canard angle (deg)")
+    axes[2].plot(t, canard_applied_deg, linestyle="--", label="Applied canard angle (deg)")
     axes[2].axhline(0, color="k", linewidth=0.4)
     axes[2].set_ylabel("Roll rate vs canard angle")
     axes[2].set_xlabel("Time (s)")
@@ -506,24 +510,55 @@ def save_and_plot_results(
     fig6.savefig(output_path / "canard_angle.png", dpi=150)
     plt.close(fig6)
 
-    fig7, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
-    axes[0].plot(t, mach)
-    axes[0].set_ylabel("Mach number")
-    axes[0].grid(True)
+    canard_roll_moment = results.get("canard_roll_moment")
+    fin_roll_moment = results.get("fin_roll_moment")
+    total_roll_moment = results.get("total_roll_moment")
+    if canard_roll_moment is not None and fin_roll_moment is not None and total_roll_moment is not None:
+        inertia_hist = np.array([controls.get_inertia(float(ti)) for ti in t])
+        inertia_dot_hist = np.array([controls.get_inertia_dot(float(ti)) for ti in t])
+        roll_accel_from_moment = (
+            (inertia_hist[:, 0] - inertia_hist[:, 1]) * x_true[:, 0] * x_true[:, 1]
+            + total_roll_moment
+            - inertia_dot_hist[:, 2] * x_true[:, 2]
+        ) / inertia_hist[:, 2]
+        canard_roll_accel = canard_roll_moment / inertia_hist[:, 2]
+        roll_accel_logged = deriv[:, 2]
 
-    axes[1].plot(t, cd_hist)
-    axes[1].set_ylabel("Drag coefficient Cd")
-    axes[1].grid(True)
+        burnout_t = float(controls.t_motor_burnout)
+        post_burn = t >= burnout_t
+        if np.any(post_burn):
+            accel_rmse = float(
+                np.sqrt(np.mean((roll_accel_logged[post_burn] - roll_accel_from_moment[post_burn]) ** 2))
+            )
+        else:
+            accel_rmse = float("nan")
 
-    axes[2].plot(t, cp_hist)
-    axes[2].set_ylabel("CP location (m from nose)")
-    axes[2].grid(True)
-    axes[2].set_xlabel("Time (s)")
+        fig_m, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
 
-    plt.suptitle("Aerodynamics - Drag and Center of Pressure")
-    plt.tight_layout()
-    fig7.savefig(output_path / "aero.png", dpi=150)
-    plt.close(fig7)
+        axes[0].plot(t, total_roll_moment, label="total inferred roll moment")
+        axes[0].plot(t, fin_roll_moment, label="fin roll moment from dynamics")
+        axes[0].plot(t, canard_roll_moment, label="canard roll moment")
+        axes[0].axvline(burnout_t, color="r", linestyle=":", linewidth=0.8, label="burnout")
+        axes[0].axhline(0, color="k", linewidth=0.4)
+        axes[0].set_ylabel("Moment (N*m)")
+        axes[0].legend()
+        axes[0].grid(True)
+
+        axes[1].plot(t, np.rad2deg(roll_accel_logged), label="logged w3dot")
+        axes[1].plot(t, np.rad2deg(roll_accel_from_moment), linestyle="--", label="from total moment")
+        axes[1].plot(t, np.rad2deg(canard_roll_accel), linestyle=":", label="canard contribution only")
+        axes[1].axvline(burnout_t, color="r", linestyle=":", linewidth=0.8)
+        axes[1].axhline(0, color="k", linewidth=0.4)
+        axes[1].set_ylabel("Roll accel (deg/s^2)")
+        axes[1].set_xlabel("Time (s)")
+        axes[1].set_title(f"post-burn roll-accel RMSE = {np.rad2deg(accel_rmse):.3g} deg/s^2")
+        axes[1].legend()
+        axes[1].grid(True)
+
+        plt.suptitle("Roll Moment Diagnostic")
+        plt.tight_layout()
+        fig_m.savefig(output_path / "roll_moment_diagnostic.png", dpi=150)
+        plt.close(fig_m)
 
     fig8 = plt.figure(figsize=(15, 5))
     ax1 = fig8.add_subplot(131)

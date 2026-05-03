@@ -468,7 +468,7 @@ class Controls(Dynamics):
 
     def compute_control(self, t: float, xhat: np.ndarray) -> np.ndarray:
         """Compute the control input using state feedback control law with saturation.
-        u = -K(t, xhat) @ (r(t) - xhat)
+        u = -K(t, xhat) @ (xhat - r(t))
         with saturation to respect actuator limits.
 
         Control is inhibited:
@@ -484,7 +484,7 @@ class Controls(Dynamics):
             np.ndarray: Control input vector.
         """
         r_t = self.r(t)
-        error = r_t - xhat
+        error = xhat - r_t
         K_t = self.K(t, xhat)
         u_cmd = np.asarray(-K_t @ error, dtype=float).reshape(-1)
         u_prev = np.asarray(getattr(self, "_last_u_cmd", self.u0), dtype=float).reshape(-1)

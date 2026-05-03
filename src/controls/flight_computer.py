@@ -24,9 +24,13 @@ class Flight_Computer_Sim:
         self.t_log      = []   # time at each step
         self.xhat_log   = []   # EKF state estimate [w1,w2,w3,v1,v2,v3,qw,qx,qy,qz]
         self.u_log      = []   # control input (canard deflection angle)
+        self.u_applied_log = []  # control input actually used for truth propagation
         self.x_true_log = []   # true state passed in from RocketPy
         self.roll_log   = []   # w3 true vs estimated for quick plotting
         self.deriv_log  = []   # true state derivatives [w1dot..v3dot] (first 6)
+        self.fin_roll_moment_log = []  # main-fin roll moment from dynamics EOM (N*m)
+        self.canard_roll_moment_log = []  # canard roll moment actually applied (N*m)
+        self.total_roll_moment_log = []   # total roll moment inferred from w3dot (N*m)
         self.P_diag_log = []   # EKF covariance diagonal (uncertainty per state)
 
     def step(self, t, dt, true_state, true_derivs, u_prev, altitude_asl=0.0, true_temperature=288.15):
@@ -43,6 +47,30 @@ class Flight_Computer_Sim:
         xhat = self.ekf.update(t, dt, y_meas, u_prev)
         u = self.controls.compute_control(t, xhat)
         return xhat, u
+
+    def _canard_roll_moment(self, t: float, x: np.ndarray, u: np.ndarray) -> float:
+        """Return the numeric canard roll moment applied by controls.f_numeric."""
+        canard_func = getattr(self.controls, "_canard_cfd_func", None)
+        if canard_func is None or u is None or len(u) == 0:
+            return 0.0
+
+        param_vals = self.controls._gather_param_values(
+            t,
+            x,
+            getattr(self.controls, "_current_altitude", None),
+        )
+        v_wind_x = param_vals[19]
+        v_wind_y = param_vals[20]
+        va = self.controls._compute_body_airspeed(x, v_wind_x, v_wind_y)
+        v_air_mag = float(np.linalg.norm(va))
+        return float(canard_func(v_air_mag, float(u[0])))
+
+    def _roll_moment_from_derivative(self, t: float, x: np.ndarray, w3dot: float) -> float:
+        """Infer total body-axis roll moment from Euler's roll equation."""
+        I1, I2, I3 = self.controls.get_inertia(t)
+        _, _, I3dot = self.controls.get_inertia_dot(t)
+        w1, w2, w3 = x[:3]
+        return float(I3 * w3dot - (I1 - I2) * w1 * w2 + I3dot * w3)
 
     def run_ekf_controlled(self, t_total=None, initial_altitude=0.0):
         """Standalone EKF + control simulation — no RocketPy truth data needed.
@@ -74,19 +102,23 @@ class Flight_Computer_Sim:
 
             self.controls.set_current_altitude(altitude_asl)
             self.controls.set_current_temperature(temperature)
+            u_applied = u.copy()
 
             # True derivatives — RK4 propagation.
             # Euler at dt=0.01s is unstable for this rocket's pitch/yaw oscillator
             # (damping ratio ~1.7%, ω_n ~6.6 rad/s → Euler stable limit ~0.005s).
             # u and altitude are held constant over the interval.
-            k1   = self.controls.f_numeric(t,        x_true,              u)
-            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u)
-            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u)
-            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u)
+            k1   = self.controls.f_numeric(t,        x_true,              u_applied)
+            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u_applied)
+            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u_applied)
+            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u_applied)
             xdot = k1  # start-of-step derivative used for logging and IMU
             true_derivs = np.zeros(10)
             true_derivs[:3] = xdot[:3]
             true_derivs[3:6] = xdot[3:6] + np.cross(x_true[0:3], x_true[3:6])
+            fin_roll_moment = self.controls.fin_roll_moment_numeric(t, x_true, altitude_asl)
+            canard_roll_moment = self._canard_roll_moment(t, x_true, u_applied)
+            total_roll_moment = self._roll_moment_from_derivative(t, x_true, xdot[2])
 
             # IMU model: inject noise into true state + derivs
             imu_output    = self.imu.read(t, x_true, true_derivs, temperature)
@@ -102,9 +134,13 @@ class Flight_Computer_Sim:
             self.t_log.append(t)
             self.xhat_log.append(xhat.copy())
             self.u_log.append(u.copy())
+            self.u_applied_log.append(u_applied.copy())
             self.x_true_log.append(x_true.copy())
             self.roll_log.append((x_true[2], xhat[2]))
             self.deriv_log.append(xdot[:6].copy())
+            self.fin_roll_moment_log.append(fin_roll_moment)
+            self.canard_roll_moment_log.append(canard_roll_moment)
+            self.total_roll_moment_log.append(total_roll_moment)
             self.P_diag_log.append(self.ekf.P.diagonal().copy())
             pos_log.append(position.copy())
             temp_log.append(temperature)
@@ -175,16 +211,20 @@ class Flight_Computer_Sim:
 
             self.controls.set_current_altitude(altitude_asl)
             self.controls.set_current_temperature(temperature)
+            u_applied = u.copy()
 
             # RK4: u=0 throughout, altitude held constant over the interval
-            k1   = self.controls.f_numeric(t,        x_true,              u)
-            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u)
-            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u)
-            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u)
+            k1   = self.controls.f_numeric(t,        x_true,              u_applied)
+            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u_applied)
+            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u_applied)
+            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u_applied)
             xdot = k1  # start-of-step derivative for logging and IMU
             true_derivs = np.zeros(10)
             true_derivs[:3] = xdot[:3]
             true_derivs[3:6] = xdot[3:6] + np.cross(x_true[0:3], x_true[3:6])
+            fin_roll_moment = self.controls.fin_roll_moment_numeric(t, x_true, altitude_asl)
+            canard_roll_moment = self._canard_roll_moment(t, x_true, u_applied)
+            total_roll_moment = self._roll_moment_from_derivative(t, x_true, xdot[2])
 
             imu_output    = self.imu.read(t, x_true, true_derivs, temperature)
             y_meas        = imu_output[:6]
@@ -196,9 +236,13 @@ class Flight_Computer_Sim:
             self.t_log.append(t)
             self.xhat_log.append(xhat.copy())
             self.u_log.append(u.copy())
+            self.u_applied_log.append(u_applied.copy())
             self.x_true_log.append(x_true.copy())
             self.roll_log.append((x_true[2], xhat[2]))
             self.deriv_log.append(xdot[:6].copy())
+            self.fin_roll_moment_log.append(fin_roll_moment)
+            self.canard_roll_moment_log.append(canard_roll_moment)
+            self.total_roll_moment_log.append(total_roll_moment)
             self.P_diag_log.append(self.ekf.P.diagonal().copy())
             pos_log.append(position.copy())
             temp_log.append(temperature)
@@ -286,14 +330,18 @@ class Flight_Computer_Sim:
         self.t_log      = []
         self.xhat_log   = []
         self.u_log      = []
+        self.u_applied_log = []
         self.x_true_log = []
         self.roll_log   = []
         self.deriv_log  = []
+        self.fin_roll_moment_log = []
+        self.canard_roll_moment_log = []
+        self.total_roll_moment_log = []
         self.P_diag_log = []
 
     def _package_logs(self) -> dict:
         roll = np.array(self.roll_log)
-        return {
+        results = {
             't':         np.array(self.t_log),
             'xhat':      np.array(self.xhat_log),
             'u':         np.array(self.u_log),
@@ -303,3 +351,12 @@ class Flight_Computer_Sim:
             'deriv':     np.array(self.deriv_log),    # shape (n, 6): [w1dot..v3dot]
             'P_diag':    np.array(self.P_diag_log),   # shape (n, 10): EKF covariance diag
         }
+        if len(self.u_applied_log) == len(self.t_log):
+            results['u_applied'] = np.array(self.u_applied_log)
+        if len(self.fin_roll_moment_log) == len(self.t_log):
+            results['fin_roll_moment'] = np.array(self.fin_roll_moment_log)
+        if len(self.canard_roll_moment_log) == len(self.t_log):
+            results['canard_roll_moment'] = np.array(self.canard_roll_moment_log)
+        if len(self.total_roll_moment_log) == len(self.t_log):
+            results['total_roll_moment'] = np.array(self.total_roll_moment_log)
+        return results

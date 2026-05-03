@@ -10,6 +10,6 @@ RocketPy cant sweep best fit: -0.1139 deg
 
 Log apogee: x=3489.1 m at t=25.42 s
 Log apogee horizontal: y=719.2 m west, z=185.7 m north
-RocketPy apogee: x=3271.5 m at t=24.46 s
+RocketPy apogee: x=3319.0 m at t=24.68 s
 
 Note: measured y/z are reconstructed from speed and tilt because ascent GPS was invalid.

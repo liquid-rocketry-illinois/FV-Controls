@@ -36,7 +36,7 @@ fin_params = {
     "Cr": 0.305,  # m, fin root chord
     "Ct": 0.152,  # m, fin tip chord
     "s": 0.133,  # m, fin span
-    "delta": 0.5,  # deg, main-fin cant angle from rocketpy.ipynb
+    "delta": 0.1139,  # deg, main-fin cant angle from rocketpy.ipynb
 }
 
 

@@ -76,7 +76,7 @@ def build_rocketpy_stack(main_fin_cant_angle=0):
         span=0.0635,
         position=1.04,
         sweep_angle=0.001,
-        cant_angle=0,
+        cant_angle=0.1139,
     )
 
     tail = control_freak.add_tail(

@@ -148,8 +148,6 @@ class Dynamics(MomentsForces):
         self._A_numeric = None  # Cached lambdified Jacobian of f wrt state
 
         self._drag_func = None # C_d as function of Mach number
-        self._cnalpha_rocket_func = None  # optional: Cnalpha_rocket as function of Mach
-        self._cnalpha_fin_func    = None  # optional: Cnalpha_fin as function of Mach
 
         #environment - call from rocektpy
         self._env_density_func     = None  # rho(altitude) from RocketPy env
@@ -205,38 +203,6 @@ class Dynamics(MomentsForces):
         """
         x_CG = self.x_CG_0 - (self.x_CG_0 - self.x_CG_f) / self.t_motor_burnout * t if t <= self.t_motor_burnout else self.x_CG_f
         return x_CG
-
-    ## BUGGED ##
-    def get_AoA(self, v_wind: list, state: list):
-        w1, w2, w3, v1, v2, v3, qw, qx, qy, qz = state
-        v_wind1, v_wind2 = v_wind
-        t_sym = self.t_sym
-        H = Heaviside(t_sym - Float(self.t_launch_rail_clearance), 0)  # 0 if t < t_launch_rail_clearance, 1 if t >= t_launch_rail_clearance
-
-        v_wind3 = Float(0)
-
-        # Velocity of rocket relative to air (points where rocket is moving through air)
-        va1 = v1 - v_wind1
-        va2 = v2 - v_wind2
-        va3 = v3 - v_wind3
-
-        eps = Float("1e-6")
-
-        # Body +z axis expressed in world frame (3rd column of DCM)
-        b1 = 2 * (qx*qz + qw*qy)
-        b2 = 2 * (qy*qz - qw*qx)
-        b3 = 1 - 2 * (qx*qx + qy*qy)
-
-        # Parallel component and perpendicular magnitude (stable)
-        Vpar = b1*va1 + b2*va2 + b3*va3
-        V2   = va1**2 + va2**2 + va3**2
-        Vperp2 = Max(Float(0), V2 - Vpar**2)
-        Vperp  = sqrt(Vperp2)
-
-        # AoA magnitude (0 when aligned, safe at small speeds)
-        AoA = H * atan2(Vperp, Vpar + eps)
-        return AoA
-        
 
     def quat_to_euler_xyz(self, q: np.ndarray, degrees=False, eps=1e-9) -> tuple:
         """
@@ -300,42 +266,6 @@ class Dynamics(MomentsForces):
         if degrees:
             return np.degrees(theta), np.degrees(phi), np.degrees(psi)
         return theta, phi, psi
-
-
-    def euler_to_quat_xyz(self, theta, phi, psi, degrees=False) -> np.ndarray:
-        """
-        Convert Euler angles to a quaternion using intrinsic XYZ:
-            - theta: rotation about x (pitch)
-            - phi:   rotation about y (yaw)
-            - psi:   rotation about z (roll)
-        Convention: R = Rz(psi) @ Ry(phi) @ Rx(theta)
-        Quaternion is returned as [w, x, y, z].
-
-        Args:
-            theta, phi, psi : floats (radians by default; set degrees=True if in deg)
-            degrees         : if True, inputs are in degrees
-
-        Returns:
-            np.ndarray shape (4,) -> [w, x, y, z]
-        """
-        if degrees:
-            theta, phi, psi = np.radians([theta, phi, psi])
-
-        # half-angles
-        cth, sth = np.cos(theta/2.0), np.sin(theta/2.0)
-        cph, sph = np.cos(phi/2.0),   np.sin(phi/2.0)
-        cps, sps = np.cos(psi/2.0),   np.sin(psi/2.0)
-
-        # intrinsic XYZ closed form (q = qz * qy * qx), scalar-first
-        qw =  cph*cps*cth + sph*sps*sth
-        qx = -sph*sps*cth + sth*cph*cps
-        qy =  sph*cps*cth + sps*sth*cph
-        qz = -sph*sth*cps + sps*cph*cth
-
-        q = np.array([qw, qx, qy, qz], dtype=float)
-        # normalize to guard against numerical drift
-        q /= np.linalg.norm(q)
-        return q
 
 
     def R_BW_from_q(self, qw, qx, qy, qz) -> Matrix:
@@ -625,17 +555,8 @@ class Dynamics(MomentsForces):
                 "No drag model set. Call controls.set_drag_func() or provide C_d in setRocketParams()."
             )
 
-        # Cnalpha_fin
-        if self._cnalpha_fin_func is not None and x is not None:
-            Cnalpha_fin_val = float(self._cnalpha_fin_func(mach))
-        else:
-            Cnalpha_fin_val = float(self.Cnalpha_fin)
-
-        # Cnalpha_rocket
-        if self._cnalpha_rocket_func is not None and x is not None:
-            Cnalpha_rocket_val = float(self._cnalpha_rocket_func(mach))
-        else:
-            Cnalpha_rocket_val = float(self.Cnalpha_rocket)
+        Cnalpha_fin_val = float(self.Cnalpha_fin)
+        Cnalpha_rocket_val = float(self.Cnalpha_rocket)
 
         # CP location — 2D (AoA + Mach) if func registered, else AoA-only fallback
         if self._cp_2d_func is not None:
@@ -659,8 +580,8 @@ class Dynamics(MomentsForces):
             float(x_CG),
             float(np.deg2rad(self.delta)),
             C_d_val,                # Mach-dependent if drag_func set
-            Cnalpha_fin_val,        # Mach-dependent if cnalpha_fin_func set
-            Cnalpha_rocket_val,     # Mach-dependent if cnalpha_rocket_func set
+            Cnalpha_fin_val,
+            Cnalpha_rocket_val,
             float(self.Cr),
             float(self.Ct),
             float(self.s),
@@ -694,24 +615,6 @@ class Dynamics(MomentsForces):
         """
         self._cp_2d_func = cp_func
 
-    def set_cnalpha_rocket_func(self, func: Callable):
-        """Register a Mach-dependent Cnalpha function for the rocket body.
-
-            Args:
-            func (Callable): Function with signature (mach: float) -> float
-                            returning Cnalpha_rocket at a given Mach number.
-        """
-        self._cnalpha_rocket_func = func
-
-    def set_cnalpha_fin_func(self, func: Callable):
-        """Register a Mach-dependent Cnalpha function for the fins.
-
-        Args:
-            func (Callable): Function with signature (mach: float) -> float
-                            returning Cnalpha_fin at a given Mach number.
-        """
-        self._cnalpha_fin_func = func
-
     def set_env_from_rocketpy(self, env):
         """Register altitude-dependent atmospheric functions from a
         RocketPy Environment object. Once set, rho, g, and v_wind are
@@ -727,10 +630,3 @@ class Dynamics(MomentsForces):
         self._env_wind_x_func      = env.wind_velocity_x   # callable: altitude (m) -> m/s
         self._env_wind_y_func      = env.wind_velocity_y   # callable: altitude (m) -> m/s
         self._env_temperature_func = env.temperature        # callable: altitude (m) -> K
-      
-# For testing
-def main():
-    print("Hello there")
-
-if __name__ == "__main__":
-    main()

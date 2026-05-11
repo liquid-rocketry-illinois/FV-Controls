@@ -1,0 +1,14 @@
+{
+  "source": "RocketPy Windy forecast",
+  "model_file": "GFS",
+  "launch_lat": 40.386772,
+  "launch_lon": -87.511283,
+  "launch_elevation_m": 216.1,
+  "launch_date": "2026-04-18T12:00:00",
+  "launch_timezone": "America/New_York",
+  "min_altitude_agl_m": 0.0,
+  "max_altitude_agl_m": 6000.0,
+  "step_m": 50.0,
+  "row_count": 121,
+  "lookup_note": "Use altitude_asl_m as the primary onboard interpolation coordinate."
+}

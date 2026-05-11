@@ -51,6 +51,26 @@ class Controls(Dynamics):
         self._mach_activation_threshold = None   # None = start control at burnout (default)
         self._current_temperature = 288.15        # K, updated each step from IMU temperature channel
 
+        # Canard roll-effectiveness sign monitor.  This is for the case where
+        # flight aero produces the opposite roll acceleration from the modeled
+        # canard moment sign; the EKF roll-rate sign itself is left unchanged.
+        self.roll_effectiveness_sign = 1.0
+        self._roll_effectiveness_initial_sign = 1.0
+        self.roll_effectiveness_flip_count = 0
+        self._roll_effectiveness_mismatch_count = 0
+        self._roll_effectiveness_prev_t = None
+        self._roll_effectiveness_prev_w3_meas = None
+        self._roll_effectiveness_monitor = {
+            "enabled": False,
+            "post_burn_delay_s": 0.25,
+            "min_abs_command_rad": np.deg2rad(2.0),
+            "min_abs_expected_roll_accel_rad_s2": 0.5,
+            "min_abs_measured_roll_accel_rad_s2": 0.5,
+            "required_consecutive_mismatches": 5,
+            "allow_flip_back": True,
+            "print_on_flip": True,
+        }
+
     def set_symbols(self):
         """Set the symbolic variables for the control inputs. 
         Supersedes the parent method to include control surface deflection angle. If more control surfaces are added in the future, they should be included here. Simply append more symbols to self.input_vars."""
@@ -258,6 +278,139 @@ class Controls(Dynamics):
         """
         self._canard_jacobian_func = func
 
+    def configure_roll_effectiveness_monitor(
+        self,
+        enabled: bool = True,
+        initial_sign: float = 1.0,
+        post_burn_delay_s: float = 0.25,
+        min_abs_command_rad: float = None,
+        min_abs_expected_roll_accel_rad_s2: float = 0.5,
+        min_abs_measured_roll_accel_rad_s2: float = 0.5,
+        required_consecutive_mismatches: int = 5,
+        allow_flip_back: bool = False,
+        print_on_flip: bool = True,
+    ):
+        """Enable runtime detection of reversed canard roll effectiveness.
+
+        The monitor compares measured gyro-derived roll acceleration against the
+        roll acceleration predicted by the canard moment model for the command
+        that was applied over the previous interval.  If the signs disagree for
+        enough consecutive samples, roll_effectiveness_sign is flipped.  K_func
+        can multiply its roll gain by that sign.
+        """
+        sign = 1.0 if float(initial_sign) >= 0.0 else -1.0
+        self.roll_effectiveness_sign = sign
+        self._roll_effectiveness_initial_sign = sign
+        self._roll_effectiveness_monitor = {
+            "enabled": bool(enabled),
+            "post_burn_delay_s": float(post_burn_delay_s),
+            "min_abs_command_rad": (
+                np.deg2rad(2.0) if min_abs_command_rad is None else float(min_abs_command_rad)
+            ),
+            "min_abs_expected_roll_accel_rad_s2": float(min_abs_expected_roll_accel_rad_s2),
+            "min_abs_measured_roll_accel_rad_s2": float(min_abs_measured_roll_accel_rad_s2),
+            "required_consecutive_mismatches": int(required_consecutive_mismatches),
+            "allow_flip_back": bool(allow_flip_back),
+            "print_on_flip": bool(print_on_flip),
+        }
+        self.reset_roll_effectiveness_monitor(reset_sign=False)
+
+    def reset_roll_effectiveness_monitor(self, reset_sign: bool = True):
+        """Reset roll-effectiveness monitor history between runs."""
+        if reset_sign:
+            self.roll_effectiveness_sign = self._roll_effectiveness_initial_sign
+        self.roll_effectiveness_flip_count = 0
+        self._roll_effectiveness_mismatch_count = 0
+        self._roll_effectiveness_prev_t = None
+        self._roll_effectiveness_prev_w3_meas = None
+
+    def update_roll_effectiveness_sign(self, t, y_meas, u_applied, xhat=None):
+        """Flip K sign if measured roll acceleration opposes modeled canard effect."""
+        config = self._roll_effectiveness_monitor
+        if not config.get("enabled", False):
+            return self.roll_effectiveness_sign
+
+        y_meas = np.asarray(y_meas, dtype=float).reshape(-1)
+        if y_meas.size < 6 or u_applied is None:
+            return self.roll_effectiveness_sign
+
+        t = float(t)
+        w3_meas = float(y_meas[5])
+        prev_t = self._roll_effectiveness_prev_t
+        prev_w3 = self._roll_effectiveness_prev_w3_meas
+        self._roll_effectiveness_prev_t = t
+        self._roll_effectiveness_prev_w3_meas = w3_meas
+
+        if prev_t is None or prev_w3 is None:
+            return self.roll_effectiveness_sign
+
+        dt = t - float(prev_t)
+        if dt <= 0.0:
+            self._roll_effectiveness_mismatch_count = 0
+            return self.roll_effectiveness_sign
+
+        if self.is_motor_burning(t):
+            self._roll_effectiveness_mismatch_count = 0
+            return self.roll_effectiveness_sign
+
+        if self.t_motor_burnout is not None:
+            if t < float(self.t_motor_burnout) + config["post_burn_delay_s"]:
+                self._roll_effectiveness_mismatch_count = 0
+                return self.roll_effectiveness_sign
+
+        if self._mach_activation_threshold is not None and xhat is not None:
+            if self._current_mach(np.asarray(xhat, dtype=float)) > self._mach_activation_threshold:
+                self._roll_effectiveness_mismatch_count = 0
+                return self.roll_effectiveness_sign
+
+        u_applied = np.asarray(u_applied, dtype=float).reshape(-1)
+        if u_applied.size == 0:
+            return self.roll_effectiveness_sign
+        zeta = float(u_applied[0])
+        if abs(zeta) < config["min_abs_command_rad"]:
+            self._roll_effectiveness_mismatch_count = 0
+            return self.roll_effectiveness_sign
+
+        if xhat is None or self._canard_cfd_func is None:
+            return self.roll_effectiveness_sign
+
+        xhat = np.asarray(xhat, dtype=float)
+        param_vals = self._gather_param_values(t, xhat, getattr(self, "_current_altitude", None))
+        v_wind_x = param_vals[19]
+        v_wind_y = param_vals[20]
+        va = self._compute_body_airspeed(xhat, v_wind_x, v_wind_y)
+        v_air_mag = float(np.linalg.norm(va))
+        I3 = float(self.get_inertia(t)[2])
+        expected_roll_accel = float(self._canard_cfd_func(v_air_mag, zeta)) / I3
+        measured_roll_accel = (w3_meas - float(prev_w3)) / dt
+
+        if abs(expected_roll_accel) < config["min_abs_expected_roll_accel_rad_s2"]:
+            self._roll_effectiveness_mismatch_count = 0
+            return self.roll_effectiveness_sign
+        if abs(measured_roll_accel) < config["min_abs_measured_roll_accel_rad_s2"]:
+            self._roll_effectiveness_mismatch_count = 0
+            return self.roll_effectiveness_sign
+
+        if measured_roll_accel * expected_roll_accel < 0.0:
+            self._roll_effectiveness_mismatch_count += 1
+        else:
+            self._roll_effectiveness_mismatch_count = 0
+
+        can_flip = config["allow_flip_back"] or self.roll_effectiveness_flip_count == 0
+        if can_flip and self._roll_effectiveness_mismatch_count >= config["required_consecutive_mismatches"]:
+            self.roll_effectiveness_sign *= -1.0
+            self.roll_effectiveness_flip_count += 1
+            self._roll_effectiveness_mismatch_count = 0
+            if config["print_on_flip"]:
+                print(
+                    "Roll effectiveness sign flipped: "
+                    f"t={t:.3f}s, measured_w3dot={measured_roll_accel:.3f} rad/s^2, "
+                    f"model_w3dot={expected_roll_accel:.3f} rad/s^2, "
+                    f"new_sign={self.roll_effectiveness_sign:+.0f}"
+                )
+
+        return self.roll_effectiveness_sign
+
     def get_AB(self, t: float, xhat: Matrix, u: Matrix) -> tuple:
         """Compute the A and B matrices for linearized state-space representation using cached lambdified Jacobians."""
         self.checkParamsSet()
@@ -422,21 +575,6 @@ class Controls(Dynamics):
         """
         self.r = r
 
-
-    @staticmethod
-    def accel_g_to_ms2(accel_g: np.ndarray, g: float = 9.81) -> np.ndarray:
-        """Convert accelerometer reading from g units to m/s².
-        Use this when you need the raw IMU accel output (imu_output[0:3]) in SI units.
-
-        Args:
-            accel_g: accelerometer reading in g (as returned by IMU.read()[0:3])
-            g:       gravitational acceleration in m/s² (default 9.81)
-
-        Returns:
-            np.ndarray: acceleration in m/s²
-        """
-        return np.asarray(accel_g, dtype=float) * g
-
     def set_mach_activation(self, mach_threshold: float):
         """Enable Mach-based activation: canard control only starts after burnout
         AND once the rocket slows below mach_threshold.
@@ -529,31 +667,6 @@ class Controls(Dynamics):
 
         return t < self.t_motor_burnout
 
-
-    def observer_dynamics(self, t: float, xhat: np.ndarray, u: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Compute the observer state derivative (Luenberger observer).
-
-        x̂ = A*x̂ + B*u + L*(y - ŷ)
-
-        it takes:
-            t: Current time in seconds.
-            xhat: Current estimated state vector.
-            u: Current control input vector.
-            y: Current sensor measurement vector.
-
-        It returns:
-            np.ndarray: Time derivative of estimated state.
-        """
-        A, B = self.get_AB(t, xhat, u)
-        C = self.get_C(xhat)
-
-        y_hat = C @ xhat
-        innovation = y - y_hat
-        #L is trust on sensor
-        # X= A*x + Вжи + L*(y - ý)
-        xhat_dot = A @ xhat + B @ u + self.L @ innovation
-        return xhat_dot
-    
     def set_current_altitude(self, altitude: float):
         """Update the current altitude used by _gather_param_values.
         Called by the simulation loop at each timestep."""

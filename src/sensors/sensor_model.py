@@ -9,10 +9,6 @@ class Sensor:
         self.lag = lag
         self.last_update_time = 0.0
         self.buffer = [] #for simulating lag
-
-    def is_ready(self, t):
-        """checks if enough time has passed to trigger a new sample"""
-        return t >= (self.last_update_time + self.dt)
     
     
 class IMU(Sensor):
@@ -204,17 +200,6 @@ class IMU(Sensor):
         #concat for sensor fusion, make sure order matches for C
         # [0:3] = accel, [3:6] = gyro, [6] = temperature
         return np.concatenate((a_dig, w_dig, [T_dig]))
-
-
-def make_gyro_only_sensor_model(imu: IMU, state_dim: int = 10):
-    """Return a sensor-model callback that exposes only the gyro channels."""
-    def sensor_model_func(t: float, x: np.ndarray, u=None) -> np.ndarray:
-        return np.asarray(x[0:3], dtype=float)
-
-    sensor_model_func.measurement_type = "gyro_only"
-    sensor_model_func.measurement_dim = 3
-    sensor_model_func.accel_scale = float(imu.g)
-    return sensor_model_func
 
 
 def make_accel_gyro_sensor_model(imu: IMU, controls) -> callable:

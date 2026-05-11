@@ -45,6 +45,7 @@ class Flight_Computer_Sim:
         self.controls.set_current_temperature(measured_temp)
 
         xhat = self.ekf.update(t, dt, y_meas, u_prev)
+        self.controls.update_roll_effectiveness_sign(t, y_meas, u_prev, xhat)
         u = self.controls.compute_control(t, xhat)
         return xhat, u
 
@@ -75,7 +76,7 @@ class Flight_Computer_Sim:
     def run_ekf_controlled(self, t_total=None, initial_altitude=0.0):
         """Standalone EKF + control simulation — no RocketPy truth data needed.
 
-        Truth state is propagated using controls.f_numeric (RK4 integration).
+        Truth state is propagated using controls.f_numeric (Forward Euler integration).
         EKF and control law both run at every timestep. World-frame position is
         tracked by rotating body-frame velocity through the quaternion each step.
 
@@ -104,15 +105,8 @@ class Flight_Computer_Sim:
             self.controls.set_current_temperature(temperature)
             u_applied = u.copy()
 
-            # True derivatives — RK4 propagation.
-            # Euler at dt=0.01s is unstable for this rocket's pitch/yaw oscillator
-            # (damping ratio ~1.7%, ω_n ~6.6 rad/s → Euler stable limit ~0.005s).
-            # u and altitude are held constant over the interval.
-            k1   = self.controls.f_numeric(t,        x_true,              u_applied)
-            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u_applied)
-            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u_applied)
-            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u_applied)
-            xdot = k1  # start-of-step derivative used for logging and IMU
+            # True derivatives — Forward Euler propagation.
+            xdot = self.controls.f_numeric(t, x_true, u_applied)
             true_derivs = np.zeros(10)
             true_derivs[:3] = xdot[:3]
             true_derivs[3:6] = xdot[3:6] + np.cross(x_true[0:3], x_true[3:6])
@@ -128,6 +122,7 @@ class Flight_Computer_Sim:
 
             # EKF predict + correct, then control law
             xhat = self.ekf.update(t, dt, y_meas, u)
+            self.controls.update_roll_effectiveness_sign(t, y_meas, u_applied, xhat)
             u    = self.controls.compute_control(t, xhat)
 
             # --- log ---
@@ -145,8 +140,8 @@ class Flight_Computer_Sim:
             pos_log.append(position.copy())
             temp_log.append(temperature)
 
-            # RK4 propagation of truth state
-            x_true = x_true + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+            # Forward Euler propagation of truth state
+            x_true = x_true + dt * xdot
             q = x_true[6:10]
             norm = np.linalg.norm(q)
             if norm > 0:
@@ -189,7 +184,7 @@ class Flight_Computer_Sim:
     def run_ekf_only(self, t_total=None, initial_altitude=0.0):
         """Standalone EKF-only simulation using internal dynamics.
 
-        Truth is propagated with controls.f_numeric (RK4) using u=0 at every step.
+        Truth is propagated with controls.f_numeric (Forward Euler) using u=0 at every step.
         The EKF estimates the state while the control input remains zero.
         """
         self._reset_logs()
@@ -213,12 +208,8 @@ class Flight_Computer_Sim:
             self.controls.set_current_temperature(temperature)
             u_applied = u.copy()
 
-            # RK4: u=0 throughout, altitude held constant over the interval
-            k1   = self.controls.f_numeric(t,        x_true,              u_applied)
-            k2   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k1, u_applied)
-            k3   = self.controls.f_numeric(t + dt/2, x_true + dt/2 * k2, u_applied)
-            k4   = self.controls.f_numeric(t + dt,   x_true + dt   * k3, u_applied)
-            xdot = k1  # start-of-step derivative for logging and IMU
+            # Forward Euler: u=0 throughout the interval.
+            xdot = self.controls.f_numeric(t, x_true, u_applied)
             true_derivs = np.zeros(10)
             true_derivs[:3] = xdot[:3]
             true_derivs[3:6] = xdot[3:6] + np.cross(x_true[0:3], x_true[3:6])
@@ -247,7 +238,7 @@ class Flight_Computer_Sim:
             pos_log.append(position.copy())
             temp_log.append(temperature)
 
-            x_true = x_true + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+            x_true = x_true + dt * xdot
             q = x_true[6:10]
             norm = np.linalg.norm(q)
             if norm > 0:
@@ -327,6 +318,8 @@ class Flight_Computer_Sim:
         return x
 
     def _reset_logs(self):
+        if hasattr(self.controls, "reset_roll_effectiveness_monitor"):
+            self.controls.reset_roll_effectiveness_monitor()
         self.t_log      = []
         self.xhat_log   = []
         self.u_log      = []

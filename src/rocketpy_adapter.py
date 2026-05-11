@@ -194,7 +194,7 @@ class Adapter:
 
     def _propagate_internal(self, t_array: np.ndarray,
                             initial_altitude: float = 0.0) -> np.ndarray:
-        """RK4-propagate the internal dynamics model with u=0, no EKF.
+        """Forward-Euler-propagate the internal dynamics model with u=0, no EKF.
 
         Returns state history shape (n, 10) for plotting alongside RocketPy truth
         and EKF estimate in replay / closedloop modes.
@@ -211,14 +211,11 @@ class Adapter:
 
             controls.set_current_altitude(altitude)
 
-            k1 = controls.f_numeric(t,        x,              u)
-            k2 = controls.f_numeric(t + dt/2, x + dt/2 * k1, u)
-            k3 = controls.f_numeric(t + dt/2, x + dt/2 * k2, u)
-            k4 = controls.f_numeric(t + dt,   x + dt   * k3, u)
+            xdot = controls.f_numeric(t, x, u)
 
             x_hist.append(x.copy())
 
-            x = x + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+            x = x + dt * xdot
             q_norm = np.linalg.norm(x[6:10])
             if q_norm > 0:
                 x[6:10] /= q_norm

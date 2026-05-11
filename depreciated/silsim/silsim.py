@@ -17,7 +17,7 @@ from rocketpy import Flight
 
 from controls.controls import Controls
 from simulation.simulation import Simulation
-from simulation.silsim.fins import Fins
+from depreciated.silsim.fins import Fins
 
 class SilSim:
     def __init__(
